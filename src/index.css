@@ -1,0 +1,80 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* branflakes is dark-first; tokens follow the shadcn/ui convention. */
+:root {
+  --radius: 0.6rem;
+  --background: oklch(0.16 0.006 270);
+  --foreground: oklch(0.96 0.003 270);
+  --card: oklch(0.2 0.008 270);
+  --card-foreground: oklch(0.96 0.003 270);
+  --popover: oklch(0.21 0.008 270);
+  --popover-foreground: oklch(0.96 0.003 270);
+  --primary: oklch(0.78 0.14 165);
+  --primary-foreground: oklch(0.18 0.02 165);
+  --secondary: oklch(0.26 0.008 270);
+  --secondary-foreground: oklch(0.96 0.003 270);
+  --muted: oklch(0.24 0.008 270);
+  --muted-foreground: oklch(0.7 0.01 270);
+  --accent: oklch(0.28 0.01 270);
+  --accent-foreground: oklch(0.97 0.003 270);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.78 0.14 165 / 60%);
+  --sidebar: oklch(0.13 0.006 270);
+
+  /* Source identity colours (used only for the small source badges). */
+  --source-local: oklch(0.8 0.12 85);
+  --source-spotify: oklch(0.72 0.17 150);
+  --source-soundcloud: oklch(0.72 0.18 45);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-source-local: var(--source-local);
+  --color-source-spotify: var(--source-spotify);
+  --color-source-soundcloud: var(--source-soundcloud);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "tnum" 1;
+    user-select: none;
+  }
+  input, textarea, [data-selectable] {
+    user-select: text;
+  }
+}

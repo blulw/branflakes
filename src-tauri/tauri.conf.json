@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "branflakes",
+  "version": "0.1.0",
+  "identifier": "com.unifiedmusic.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "branflakes",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "additionalBrowserArgs": "--disable-features=HardwareMediaKeyHandling,msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' https://sdk.scdn.co",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: asset: http://asset.localhost https://i.scdn.co https://*.scdn.co https://*.spotifycdn.com https://*.sndcdn.com",
+        "media-src": "'self' blob: asset: http://asset.localhost https://*.sndcdn.com https://*.soundcloud.cloud",
+        "connect-src": "ipc: http://ipc.localhost 'self' https://*.sndcdn.com https://*.soundcloud.cloud https://api.spotify.com https://*.spotify.com https://*.scdn.co wss://*.spotify.com",
+        "frame-src": "https://sdk.scdn.co",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [],
+          "deny": [
+            "$APPDATA/**/*.sqlite3*",
+            "$APPDATA/backups/**"
+          ]
+        }
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "publisher": "branflakes",
+    "shortDescription": "Local, Spotify and SoundCloud library in one Windows app",
+    "longDescription": "branflakes plays local files, controls Spotify Connect playback and streams SoundCloud, with Last.fm scrobbling for local files, Spotify and SoundCloud.",
+    "category": "Music",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    }
+  }
+}

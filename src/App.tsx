@@ -1,0 +1,84 @@
+import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { Sidebar } from "@/components/Sidebar";
+import { PlayerBar } from "@/components/PlayerBar";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { usePlayer } from "@/playback/store";
+import { useUi } from "@/state/ui";
+import { toApiError } from "@/lib/api";
+import { LibraryView } from "@/views/LibraryView";
+import { AlbumsView, ArtistsView } from "@/views/BrowseViews";
+import { PlaylistView } from "@/views/PlaylistView";
+import { QueueView } from "@/views/QueueView";
+import { SearchView } from "@/views/SearchView";
+import { SettingsView } from "@/views/SettingsView";
+import { TrackEditorDialog } from "@/views/TrackEditorDialog";
+
+function CurrentView() {
+  const view = useUi((s) => s.view);
+  switch (view.name) {
+    case "library":
+      return <LibraryView />;
+    case "artists":
+      return <ArtistsView />;
+    case "artist":
+      return <LibraryView key={view.artist} artist={view.artist} title={view.artist} />;
+    case "albums":
+      return <AlbumsView />;
+    case "album":
+      return <LibraryView key={view.album} album={view.album} title={view.album} />;
+    case "playlist":
+      return <PlaylistView key={view.id} id={view.id} />;
+    case "queue":
+      return <QueueView />;
+    case "search":
+      return <SearchView />;
+    case "settings":
+      return <SettingsView />;
+  }
+}
+
+export default function App() {
+  const [ready, setReady] = useState(false);
+  const [fatal, setFatal] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([usePlayer.getState().init(), useUi.getState().refreshSettings()])
+      .then(() => setReady(true))
+      .catch((e) => setFatal(toApiError(e).message));
+  }, []);
+
+  if (fatal) {
+    return (
+      <div className="grid h-full place-items-center p-8 text-center">
+        <div className="max-w-md space-y-2">
+          <h1 className="text-lg font-semibold">branflakes could not start</h1>
+          <p className="text-sm text-muted-foreground" data-selectable>{fatal}</p>
+        </div>
+      </div>
+    );
+  }
+  if (!ready) {
+    return (
+      <div className="grid h-full place-items-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="flex h-full flex-col">
+        <div className="flex min-h-0 flex-1">
+          <Sidebar />
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <CurrentView />
+          </main>
+        </div>
+        <PlayerBar />
+      </div>
+      <TrackEditorDialog />
+      <Toaster position="bottom-right" offset={{ bottom: 110 }} />
+    </TooltipProvider>
+  );
+}

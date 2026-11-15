@@ -1,0 +1,57 @@
+[package]
+name = "branflakes"
+version = "0.1.0"
+description = "branflakes"
+authors = ["branflakes"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "branflakes_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+tokio = { version = "1.54.1", features = ["full"] }
+lofty = "0.25.5"
+walkdir = "2.5.0"
+thiserror = "2.0.21"
+uuid = { version = "1.29.2", features = ["v4"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+md5 = "0.8.1"
+sha2 = "0.11.1"
+base64 = "0.23.1"
+url = "2.5.8"
+log = "0.4.35"
+env_logger = "0.11.11"
+urlencoding = "2.1.3"
+souvlaki = "0.9.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "query", "native-tls"] }
+regex = "1.13.1"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+mockito = "1.7.2"
+tempfile = "3.27.0"
