@@ -1,7 +1,7 @@
 //! Tauri command layer. Thin: validates input, delegates to db/providers,
 //! and converts results. No provider logic lives in the UI.
 
-use crate::db::{self, library, playlists, queue, scrobbles, settings};
+use crate::db::{self, library, playlists, queue, scrobbles, settings, spotify_links};
 use crate::error::{AppError, AppResult};
 use crate::media::MediaUpdate;
 use crate::model::{ProviderStatus, Source, Track};
@@ -15,6 +15,7 @@ use crate::providers::{
 use crate::scrobbler::{self, FlushReport, SubmitOutcome};
 use crate::secrets::{self, Secret};
 use crate::state::{require, AppState};
+use crate::sync::{self, AddOutcome, SyncCtx, SyncEvent, SyncReport};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -211,18 +212,121 @@ pub fn playlist_list(state: S<'_>) -> AppResult<Vec<playlists::Playlist>> {
 }
 
 #[tauri::command]
-pub fn playlist_create(state: S<'_>, name: String) -> AppResult<playlists::Playlist> {
-    playlists::create(&state.conn(), &name, None)
+pub async fn playlist_create(app: AppHandle, state: S<'_>, name: String, sync_with_spotify: Option<bool>) -> AppResult<CreatePlaylistResult> {
+    // Always local first: the Branflakes playlist exists whatever Spotify does.
+    let pl = playlists::create(&state.conn(), &name, None)?;
+    if sync_with_spotify != Some(true) {
+        return Ok(CreatePlaylistResult { playlist: pl, spotify_error: None });
+    }
+    let spotify_error = link_to_spotify(&app, &state, &pl.id).await.err().map(|e| e.to_string());
+    Ok(CreatePlaylistResult { playlist: playlists::get(&state.conn(), &pl.id)?, spotify_error })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlaylistResult {
+    pub playlist: playlists::Playlist,
+    /// Set when Spotify sync was requested but couldn't be enabled; the
+    /// Branflakes playlist was still created (local-only for now).
+    pub spotify_error: Option<String>,
+}
+
+/// Create (or adopt) the Spotify playlist, link it, then push the contents.
+/// A failure after linking is a normal sync error (retried automatically).
+async fn link_to_spotify(app: &AppHandle, state: &AppState, playlist_id: &str) -> AppResult<()> {
+    let ctx = sync_ctx(state).map_err(|e| match e {
+        AppError::NotConnected { .. } => AppError::NotConnected { provider: "spotify".into() },
+        other => other,
+    })?;
+    {
+        let _run = state.sync.run_lock.lock().await;
+        sync::create_and_link(&ctx, playlist_id).await?;
+    }
+    emit_sync(app, SyncEvent { playlist_id: playlist_id.into(), status: "ok".into(), changed: true, message: None });
+    if let Err(e) = run_sync(app, state, playlist_id, true).await {
+        log::info!("first sync after linking {playlist_id} failed: {e}");
+    }
+    Ok(())
+}
+
+/// Explicitly link an existing local-only playlist to a new Spotify
+/// playlist (or an imported one to its original). Safe to retry.
+#[tauri::command]
+pub async fn playlist_link_spotify(app: AppHandle, state: S<'_>, id: String) -> AppResult<playlists::Playlist> {
+    link_to_spotify(&app, &state, &id).await?;
+    playlists::get(&state.conn(), &id)
+}
+
+/// For a Spotify Synced playlist that only the owner may edit (rename,
+/// cover), refuse up front with an explanation.
+fn require_details_editable(conn: &rusqlite::Connection, id: &str, what: &str) -> AppResult<()> {
+    if let Some(l) = spotify_links::get_enabled(conn, id)? {
+        if !l.can_edit_details {
+            return Err(AppError::Unsupported(format!(
+                "this is a collaborative Spotify playlist owned by someone else; only the owner can {what}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// After a local edit to a synced playlist, push it soon (debounced).
+fn sync_after_edit(state: &AppState, id: &str) {
+    if matches!(spotify_links::get_enabled(&state.conn(), id), Ok(Some(_))) {
+        let _ = spotify_links::set_status(&state.conn(), id, "pending", None);
+        state.sync.request(id, sync::EDIT_DEBOUNCE);
+    }
 }
 
 #[tauri::command]
 pub fn playlist_rename(state: S<'_>, id: String, name: String) -> AppResult<()> {
-    playlists::rename(&state.conn(), &id, &name)
+    {
+        let conn = state.conn();
+        require_details_editable(&conn, &id, "rename it")?;
+        playlists::rename(&conn, &id, &name)?;
+    }
+    sync_after_edit(&state, &id);
+    Ok(())
 }
 
+/// Delete a playlist. Ordinary playlists and Branflakes-only copies are
+/// deleted locally and never touch Spotify. A Spotify Synced playlist needs
+/// `confirm_spotify: true` (the user confirmed it also goes from Spotify) or
+/// `keep_on_spotify: true` (stop syncing and delete only the Branflakes copy).
 #[tauri::command]
-pub fn playlist_delete(state: S<'_>, id: String) -> AppResult<()> {
-    playlists::delete(&state.conn(), &id)
+pub async fn playlist_delete(
+    app: AppHandle,
+    state: S<'_>,
+    id: String,
+    confirm_spotify: Option<bool>,
+    keep_on_spotify: Option<bool>,
+) -> AppResult<Option<String>> {
+    let linked = spotify_links::get_enabled(&state.conn(), &id)?.is_some();
+    if !linked {
+        playlists::delete(&state.conn(), &id)?;
+        return Ok(None);
+    }
+    if keep_on_spotify == Some(true) {
+        let conn = state.conn();
+        let tx = conn.unchecked_transaction()?;
+        spotify_links::delete(&tx, &id)?;
+        playlists::delete(&tx, &id)?;
+        tx.commit()?;
+        return Ok(Some("Deleted from Branflakes. The Spotify playlist was not changed.".into()));
+    }
+    if confirm_spotify != Some(true) {
+        return Err(AppError::InvalidInput(
+            "this playlist is Spotify Synced: confirm that it should also be removed from Spotify, or choose to keep it on Spotify".into(),
+        ));
+    }
+    let ctx = sync_ctx(&state)?;
+    let Some(_guard) = state.sync.begin(&id) else {
+        return Err(AppError::Other("this playlist is syncing right now; try again in a moment".into()));
+    };
+    let _run = state.sync.run_lock.lock().await;
+    let msg = sync::delete_synced(&ctx, &id).await?;
+    emit_sync(&app, SyncEvent { playlist_id: id.clone(), status: "deleted".into(), changed: true, message: Some(msg.clone()) });
+    Ok(Some(msg))
 }
 
 #[tauri::command]
@@ -233,13 +337,14 @@ pub fn playlist_mark_played(state: S<'_>, id: String) -> AppResult<()> {
 /// Set a cover image (copied into the artwork cache) or clear it with `null`.
 #[tauri::command]
 pub fn playlist_set_artwork(state: S<'_>, id: String, image_path: Option<String>) -> AppResult<playlists::Playlist> {
+    require_details_editable(&state.conn(), &id, "change its cover")?;
     let stored = match image_path {
         Some(p) => Some(local::import_override_artwork(Path::new(&p), &state.paths.artwork_dir)?.to_string_lossy().into_owned()),
         None => None,
     };
-    let conn = state.conn();
-    playlists::set_artwork(&conn, &id, stored.as_deref())?;
-    playlists::get(&conn, &id)
+    playlists::set_artwork(&state.conn(), &id, stored.as_deref())?;
+    sync_after_edit(&state, &id);
+    playlists::get(&state.conn(), &id)
 }
 
 #[tauri::command]
@@ -247,19 +352,45 @@ pub fn playlist_tracks(state: S<'_>, id: String) -> AppResult<Vec<Track>> {
     playlists::tracks(&state.conn(), &id)
 }
 
+/// Add tracks (optionally at a position). Enforces the Spotify Synced rule:
+/// a non-Spotify track creates a Branflakes-only copy instead.
+/// Before a copy is made, the synced playlist is reconciled with Spotify's
+/// current contents (read-only); if Spotify can't be reached the copy is
+/// based on the last sync and says so.
 #[tauri::command]
-pub fn playlist_add_tracks(state: S<'_>, id: String, track_ids: Vec<String>) -> AppResult<()> {
-    playlists::add_tracks(&state.conn(), &id, &track_ids)
+pub async fn playlist_add_tracks(state: S<'_>, id: String, track_ids: Vec<String>, position: Option<usize>) -> AppResult<AddOutcome> {
+    let ctx = sync_ctx(&state).map_err(|e| match e {
+        AppError::NotConnected { .. } => "Spotify isn't connected".to_string(),
+        other => other.to_string(),
+    });
+    let out = sync::add_tracks_reconciled(&state.db, ctx.as_ref().map_err(Clone::clone), Some(&state.sync.run_lock), &id, &track_ids, position, sync::FORK_FETCH_TIMEOUT)
+        .await?;
+    if matches!(out, AddOutcome::Added { added, .. } if added > 0) {
+        sync_after_edit(&state, &id);
+    }
+    Ok(out)
 }
 
 #[tauri::command]
 pub fn playlist_remove_item(state: S<'_>, id: String, position: usize) -> AppResult<()> {
-    playlists::remove_at(&state.conn(), &id, position)
+    {
+        let conn = state.conn();
+        let removed = playlists::track_ids(&conn, &id)?.get(position).cloned();
+        playlists::remove_at(&conn, &id, position)?;
+        if let Some(track) = removed {
+            // A removed alternative is never re-added automatically.
+            crate::db::alternatives::mark_removed_if_gone(&conn, &id, &track)?;
+        }
+    }
+    sync_after_edit(&state, &id);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn playlist_move_item(state: S<'_>, id: String, from: usize, to: usize) -> AppResult<()> {
-    playlists::move_item(&state.conn(), &id, from, to)
+    playlists::move_item(&state.conn(), &id, from, to)?;
+    sync_after_edit(&state, &id);
+    Ok(())
 }
 
 // ================================================================== queue
@@ -403,8 +534,9 @@ pub struct AppSettings {
     pub lastfm_secret_set: bool,
     pub lastfm_enabled: bool,
     pub lastfm_scrobble_spotify: bool,
-    pub notifications_enabled: bool,
     pub oauth_port: u16,
+    /// Automatic Spotify playlist sync interval (minutes, default 5).
+    pub spotify_sync_interval_minutes: u64,
     pub spotify_redirect_uri: String,
     pub soundcloud_redirect_uri: String,
     pub data_dir: String,
@@ -423,8 +555,8 @@ pub fn settings_get(state: S<'_>) -> AppResult<AppSettings> {
         lastfm_secret_set: state.secrets.has(secrets::LASTFM_SHARED_SECRET),
         lastfm_enabled: settings::get_bool(&conn, settings::LASTFM_ENABLED, true)?,
         lastfm_scrobble_spotify: settings::get_bool(&conn, settings::LASTFM_SCROBBLE_SPOTIFY, true)?,
-        notifications_enabled: settings::get_bool(&conn, settings::NOTIFICATIONS_ENABLED, true)?,
         oauth_port: port,
+        spotify_sync_interval_minutes: sync::interval(&conn).as_secs() / 60,
         spotify_redirect_uri: oauth::redirect_uri(port, "spotify"),
         soundcloud_redirect_uri: oauth::redirect_uri(port, "soundcloud"),
         data_dir: state.paths.data_dir.to_string_lossy().into_owned(),
@@ -443,8 +575,8 @@ pub struct SettingsPatch {
     pub lastfm_shared_secret: Option<String>,
     pub lastfm_enabled: Option<bool>,
     pub lastfm_scrobble_spotify: Option<bool>,
-    pub notifications_enabled: Option<bool>,
     pub oauth_port: Option<u16>,
+    pub spotify_sync_interval_minutes: Option<u64>,
 }
 
 #[tauri::command]
@@ -469,8 +601,12 @@ pub fn settings_update(state: S<'_>, patch: SettingsPatch) -> AppResult<AppSetti
         if let Some(b) = patch.soundcloud_web_mode {
             settings::set(&conn, settings::SOUNDCLOUD_WEB_MODE, if b { "true" } else { "false" })?;
         }
-        if let Some(b) = patch.notifications_enabled {
-            settings::set(&conn, settings::NOTIFICATIONS_ENABLED, if b { "true" } else { "false" })?;
+        if let Some(m) = patch.spotify_sync_interval_minutes {
+            if !(1..=1440).contains(&m) {
+                return Err(AppError::InvalidInput("sync interval must be between 1 and 1440 minutes".into()));
+            }
+            settings::set(&conn, settings::SPOTIFY_SYNC_INTERVAL, &(m * 60).to_string())?;
+            state.sync.wake.notify_one();
         }
         if let Some(p) = patch.oauth_port {
             if p < 1024 {
@@ -494,10 +630,21 @@ pub fn settings_update(state: S<'_>, patch: SettingsPatch) -> AppResult<AppSetti
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NotSynced {
+    pub name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportReport {
     pub tracks: u32,
     pub playlists: u32,
     pub skipped_playlists: Vec<String>,
+    /// Imported playlists that are now Spotify Synced.
+    pub synced_playlists: u32,
+    /// Imported as ordinary playlists, with the reason sync isn't available.
+    pub not_synced: Vec<NotSynced>,
     pub errors: Vec<String>,
 }
 
@@ -520,12 +667,21 @@ fn upsert_many(state: &AppState, source: Source, items: &[crate::model::TrackUps
 }
 
 fn save_imported_playlist(state: &AppState, origin: &str, name: &str, ids: &[String]) -> AppResult<()> {
-    let conn = state.conn();
-    let pid = match playlists::find_by_origin(&conn, origin)? {
-        Some(id) => id,
-        None => playlists::create(&conn, name, Some(origin))?.id,
+    let pid = {
+        let conn = state.conn();
+        let pid = match playlists::find_by_origin(&conn, origin)? {
+            Some(id) => id,
+            None => playlists::create(&conn, name, Some(origin))?.id,
+        };
+        if spotify_links::get_enabled(&conn, &pid)?.is_none() {
+            return playlists::set_items(&conn, &pid, ids);
+        }
+        pid
     };
-    playlists::set_items(&conn, &pid, ids)
+    // Spotify Synced: never overwrite (that could drop unsynced Branflakes
+    // edits); reconcile through the sync engine instead.
+    state.sync.request(&pid, Duration::ZERO);
+    Ok(())
 }
 
 // ================================================================ spotify
@@ -563,9 +719,14 @@ pub async fn spotify_connect(app: AppHandle, state: S<'_>) -> AppResult<()> {
     let code = cb.0.get("code").ok_or_else(|| AppError::Auth { provider: "spotify".into(), message: "no authorization code returned".into() })?;
     state.spotify.exchange_code(&client_id, code, &pkce.verifier, &redirect).await?;
     let (id, name) = state.spotify.me(&client_id).await?;
-    let conn = state.conn();
-    settings::set(&conn, settings::SPOTIFY_ACCOUNT, name.as_deref().unwrap_or(&id))?;
-    settings::delete(&conn, settings::SPOTIFY_PREMIUM_DENIED)?;
+    {
+        let conn = state.conn();
+        settings::set(&conn, settings::SPOTIFY_ACCOUNT, name.as_deref().unwrap_or(&id))?;
+        settings::set(&conn, settings::SPOTIFY_USER_ID, &id)?;
+        settings::delete(&conn, settings::SPOTIFY_PREMIUM_DENIED)?;
+    }
+    // A (re)connect can fix auth or scope errors: sync again soon.
+    state.sync.wake.notify_one();
     Ok(())
 }
 
@@ -574,6 +735,7 @@ pub async fn spotify_disconnect(state: S<'_>) -> AppResult<()> {
     state.spotify.disconnect().await?;
     let conn = state.conn();
     settings::delete(&conn, settings::SPOTIFY_ACCOUNT)?;
+    settings::delete(&conn, settings::SPOTIFY_USER_ID)?;
     settings::delete(&conn, settings::SPOTIFY_PREMIUM_DENIED)
 }
 
@@ -588,16 +750,28 @@ pub async fn spotify_import_library(app: AppHandle, state: S<'_>) -> AppResult<I
     let saved = state.spotify.saved_tracks(&cid, 20_000).await?;
     report.tracks += upsert_many(&state, Source::Spotify, &saved, true)?.len() as u32;
     let lists = state.spotify.my_playlists(&cid).await?;
+    let ctx = sync_ctx(&state)?;
+    let me = sync::my_user_id(&ctx).await?;
+    // One sync operation at a time (imports enable sync on playlists).
+    let _run = state.sync.run_lock.lock().await;
     for p in lists {
         progress(format!("Importing playlist “{}”…", p.name));
-        match state.spotify.playlist_tracks(&cid, &p.id).await {
-            Ok(items) => {
-                let ids = upsert_many(&state, Source::Spotify, &items, false)?;
-                save_imported_playlist(&state, &format!("spotify:playlist:{}", p.id), &p.name, &ids)?;
+        match sync::import_playlist(&ctx, &p, &me).await {
+            Ok(sync::ImportResult::Synced { .. }) => {
                 report.playlists += 1;
+                report.synced_playlists += 1;
             }
-            // Development Mode only returns items for playlists you own or collaborate on.
-            Err(AppError::Http { status: 403 | 404, .. }) => report.skipped_playlists.push(p.name),
+            Ok(sync::ImportResult::AlreadySynced { playlist_id }) => {
+                // Reconciled by the sync engine; never overwritten here.
+                state.sync.request(&playlist_id, Duration::ZERO);
+                report.playlists += 1;
+                report.synced_playlists += 1;
+            }
+            Ok(sync::ImportResult::Plain { reason, .. }) => {
+                report.playlists += 1;
+                report.not_synced.push(NotSynced { name: p.name, reason });
+            }
+            Ok(sync::ImportResult::Skipped { .. }) => report.skipped_playlists.push(p.name),
             Err(e @ AppError::RateLimited { .. }) => return Err(e),
             Err(e) => report.errors.push(format!("{}: {e}", p.name)),
         }
@@ -661,6 +835,334 @@ pub async fn spotify_sdk_token(state: S<'_>) -> AppResult<String> {
     let cid = spotify_client_id(&state)?;
     Ok(state.spotify.sdk_access_token(&cid).await?.expose().to_string())
 }
+
+// ================================================== spotify playlist sync
+
+fn sync_ctx(state: &AppState) -> AppResult<SyncCtx<'_>> {
+    if !state.secrets.has(secrets::SPOTIFY_TOKENS) {
+        return Err(AppError::NotConnected { provider: "spotify".into() });
+    }
+    Ok(SyncCtx { db: &state.db, spotify: &state.spotify, client_id: spotify_client_id(state)?, artwork_dir: state.paths.artwork_dir.clone() })
+}
+
+fn emit_sync(app: &AppHandle, ev: SyncEvent) {
+    let _ = app.emit("playlist-sync", ev);
+}
+
+/// Run one sync (manual or scheduled), emitting `playlist-sync` events.
+/// Refuses a second simultaneous sync of the same playlist.
+pub async fn run_sync(app: &AppHandle, state: &AppState, playlist_id: &str, manual: bool) -> AppResult<SyncReport> {
+    let Some(_guard) = state.sync.begin(playlist_id) else {
+        return Err(AppError::Other("this playlist is already syncing".into()));
+    };
+    let ctx = sync_ctx(state)?;
+    emit_sync(app, SyncEvent { playlist_id: playlist_id.into(), status: "syncing".into(), changed: false, message: None });
+    let _run = state.sync.run_lock.lock().await;
+    let result = sync::sync_playlist(&ctx, playlist_id, manual).await;
+    match &result {
+        Ok(r) => emit_sync(
+            app,
+            SyncEvent {
+                playlist_id: playlist_id.into(),
+                // "removed": the Spotify playlist was confirmed gone and the
+                // Branflakes copy was removed (reported once).
+                status: if r.removed.is_some() { "removed".into() } else { "ok".into() },
+                changed: r.changed_locally(),
+                message: r.removed.clone().or_else(|| if r.notices.is_empty() { None } else { Some(r.notices.join(" ")) }),
+            },
+        ),
+        Err(e) => {
+            log::info!("spotify sync of {playlist_id} failed: {e}");
+            emit_sync(app, SyncEvent { playlist_id: playlist_id.into(), status: "error".into(), changed: false, message: Some(e.to_string()) })
+        }
+    }
+    result
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotifyPlaylistOption {
+    pub id: String,
+    pub name: String,
+    pub total: Option<u32>,
+    pub owned: bool,
+    pub collaborative: bool,
+    /// Can this playlist be synced (owned or collaborative)?
+    pub can_sync: bool,
+    pub reason: Option<String>,
+    /// Branflakes playlist it is synced with, if any.
+    pub synced_playlist_id: Option<String>,
+}
+
+/// The user's Spotify playlists with sync eligibility.
+#[tauri::command]
+pub async fn spotify_sync_candidates(state: S<'_>) -> AppResult<Vec<SpotifyPlaylistOption>> {
+    let cid = spotify_client_id(&state)?;
+    let cached = settings::get_nonempty(&state.conn(), settings::SPOTIFY_USER_ID)?;
+    let me = match cached {
+        Some(id) => id,
+        None => {
+            let (id, _) = state.spotify.me(&cid).await?;
+            settings::set(&state.conn(), settings::SPOTIFY_USER_ID, &id)?;
+            id
+        }
+    };
+    let lists = state.spotify.my_playlists(&cid).await?;
+    let conn = state.conn();
+    let mut out = Vec::with_capacity(lists.len());
+    for p in lists {
+        let owned = p.owner_id.as_deref() == Some(me.as_str());
+        let can_sync = owned || p.collaborative;
+        out.push(SpotifyPlaylistOption {
+            synced_playlist_id: spotify_links::find_by_spotify_id(&conn, &p.id)?.filter(|l| l.enabled).map(|l| l.playlist_id),
+            reason: (!can_sync).then(|| "Owned by another Spotify user. Spotify only lets apps change playlists you own or collaborate on.".to_string()),
+            id: p.id,
+            name: p.name,
+            total: p.total,
+            owned,
+            collaborative: p.collaborative,
+            can_sync,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn spotify_sync_enable(app: AppHandle, state: S<'_>, spotify_playlist_id: String) -> AppResult<playlists::Playlist> {
+    let ctx = sync_ctx(&state)?;
+    let _run = state.sync.run_lock.lock().await;
+    let pid = sync::enable(&ctx, &spotify_playlist_id).await?;
+    emit_sync(&app, SyncEvent { playlist_id: pid.clone(), status: "ok".into(), changed: true, message: None });
+    playlists::get(&state.conn(), &pid)
+}
+
+/// Stop syncing. The Branflakes playlist and the Spotify playlist both stay.
+#[tauri::command]
+pub fn spotify_sync_disable(state: S<'_>, playlist_id: String) -> AppResult<()> {
+    sync::disable(&state.conn(), &playlist_id)
+}
+
+#[tauri::command]
+pub async fn spotify_sync_now(app: AppHandle, state: S<'_>, playlist_id: String) -> AppResult<SyncReport> {
+    run_sync(&app, &state, &playlist_id, true).await
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncAllReport {
+    pub synced: u32,
+    pub failed: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn spotify_sync_all(app: AppHandle, state: S<'_>) -> AppResult<SyncAllReport> {
+    sync_ctx(&state)?;
+    let links = spotify_links::list_enabled(&state.conn())?;
+    let mut report = SyncAllReport::default();
+    for l in links {
+        let name = playlists::get(&state.conn(), &l.playlist_id).map(|p| p.name).unwrap_or_default();
+        match run_sync(&app, &state, &l.playlist_id, true).await {
+            Ok(_) => report.synced += 1,
+            Err(e) => report.failed.push(format!("{name}: {e}")),
+        }
+    }
+    Ok(report)
+}
+
+/// Backend scheduler: syncs every linked playlist every interval (default
+/// 5 min) and edited playlists shortly after each edit. Runs regardless of
+/// the window state; stops on `SyncEngine::shutdown`.
+pub async fn sync_scheduler(app: AppHandle) {
+    use std::time::Instant;
+    let state = app.state::<AppState>();
+    let eng = &state.sync;
+    // Syncs interrupted by a restart run first.
+    if let Ok(ids) = spotify_links::recover_interrupted(&state.conn()) {
+        for id in ids {
+            eng.request(&id, Duration::from_secs(5));
+        }
+    }
+    // Deletions interrupted by a restart: finish or undo them first.
+    let pending = spotify_links::pending_deletes(&state.conn());
+    if let (Ok(ids), Ok(ctx)) = (pending, sync_ctx(&state)) {
+        for id in ids {
+            match sync::resume_delete(&ctx, &id).await {
+                Ok(true) => emit_sync(&app, SyncEvent { playlist_id: id, status: "deleted".into(), changed: true, message: None }),
+                Ok(false) => {}
+                Err(e) => log::info!("resuming deletion of {id} postponed: {e}"),
+            }
+        }
+    }
+    // Imported Spotify playlists that can't be synced (checked once per run).
+    let mut not_linkable: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // First full pass shortly after startup, then every interval.
+    let mut last_full = Instant::now() - sync::interval(&state.conn()) + Duration::from_secs(30);
+    loop {
+        if eng.is_shutdown() {
+            break;
+        }
+        let interval = sync::interval(&state.conn());
+        let next_full = last_full + interval;
+        let mut wake = eng.next_due().map_or(next_full, |d| d.min(next_full));
+        if let Some(b) = eng.backoff_until() {
+            wake = wake.max(b);
+        }
+        tokio::select! {
+            _ = tokio::time::sleep_until(wake.into()) => {}
+            _ = eng.wake.notified() => {}
+        }
+        if eng.is_shutdown() {
+            break;
+        }
+        if eng.backoff_until().is_some() {
+            continue;
+        }
+        let now = Instant::now();
+        let connected = state.secrets.has(secrets::SPOTIFY_TOKENS) && spotify_client_id(&state).is_ok();
+        let full = now >= last_full + interval;
+        let mut ids = eng.take_due(now);
+        if full {
+            last_full = now;
+            if connected {
+                // Earlier imports become Spotify Synced automatically.
+                if let Ok(ctx) = sync_ctx(&state) {
+                    let linked = {
+                        let _run = eng.run_lock.lock().await;
+                        sync::auto_link_imported(&ctx, &mut not_linkable).await
+                    };
+                    match linked {
+                        Ok(ids) => {
+                            for id in ids {
+                                emit_sync(&app, SyncEvent { playlist_id: id, status: "ok".into(), changed: true, message: None });
+                            }
+                        }
+                        Err(e) => log::info!("auto-sync of imported playlists postponed: {e}"),
+                    }
+                }
+                for l in spotify_links::list_enabled(&state.conn()).unwrap_or_default() {
+                    if !ids.contains(&l.playlist_id) {
+                        ids.push(l.playlist_id);
+                    }
+                }
+            }
+        }
+        if !connected || ids.is_empty() {
+            continue;
+        }
+        for id in ids {
+            if eng.is_shutdown() {
+                break;
+            }
+            if let Err(e) = run_sync(&app, &state, &id, false).await {
+                if let Some(d) = sync::backoff_for(&e, interval) {
+                    log::info!("spotify sync paused for {d:?}: {e}");
+                    eng.back_off(d);
+                    // Retry this playlist after the pause.
+                    eng.request(&id, d);
+                    break;
+                }
+            }
+        }
+    }
+    log::info!("spotify sync scheduler stopped");
+}
+
+// ====================================================== find alternative
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlternativesResult {
+    /// Matching tracks, best first.
+    pub candidates: Vec<crate::alternatives::Ranked>,
+    /// The search failed (never reported as "no results").
+    pub error: Option<AppError>,
+    /// The provider isn't set up, with what to do about it.
+    pub unavailable: Option<String>,
+}
+
+/// Search one provider for alternatives to an (unavailable) track. The UI
+/// calls "local" first, then "soundcloud". Results are filtered to the same
+/// song (title and artist) and ranked; nothing is invented on failure.
+#[tauri::command]
+pub async fn alternatives_search(state: S<'_>, track_id: String, provider: String) -> AppResult<AlternativesResult> {
+    use crate::alternatives::{rank, search_query, title_fragment};
+    let original = library::get_track(&state.conn(), &track_id)?;
+    match provider.as_str() {
+        "local" => {
+            let conn = state.conn();
+            let mut found = Vec::new();
+            let artist = original.artist.split([',', '&']).next().unwrap_or("").trim().to_string();
+            for q in [title_fragment(&original.title), artist] {
+                if q.chars().count() < 2 {
+                    continue;
+                }
+                found.extend(library::list_tracks(
+                    &conn,
+                    &library::TrackQuery {
+                        search: Some(q),
+                        source: Some(Source::Local),
+                        include_unavailable: Some(false),
+                        limit: Some(300),
+                        ..Default::default()
+                    },
+                )?);
+            }
+            Ok(AlternativesResult { candidates: rank(&original, found), error: None, unavailable: None })
+        }
+        "soundcloud" => {
+            let q = search_query(&original);
+            let official = state.secrets.has(secrets::SOUNDCLOUD_TOKENS);
+            let web = soundcloud_web_enabled(&state)?;
+            let result = if official {
+                match soundcloud_creds(&state) {
+                    Ok(creds) => state.soundcloud.search(&creds, &q, 30).await,
+                    Err(e) => Err(e),
+                }
+            } else if web {
+                state.soundcloud_web.search(&q, 30, 0).await
+            } else {
+                return Ok(AlternativesResult {
+                    candidates: Vec::new(),
+                    error: None,
+                    unavailable: Some("SoundCloud isn't connected. Connect it, or turn on web mode, in Settings > Accounts.".into()),
+                });
+            };
+            match result {
+                Ok(items) => {
+                    // Stored as non-library tracks (like search results) so they can be added to playlists.
+                    let ids = upsert_many(&state, Source::Soundcloud, &items, false)?;
+                    let tracks = library::get_tracks(&state.conn(), &ids)?;
+                    Ok(AlternativesResult { candidates: rank(&original, tracks), error: None, unavailable: None })
+                }
+                Err(e) => Ok(AlternativesResult { candidates: Vec::new(), error: Some(e), unavailable: None }),
+            }
+        }
+        other => Err(AppError::InvalidInput(format!("unknown provider {other}"))),
+    }
+}
+
+/// Add a chosen alternative right after the original in a playlist. The
+/// original stays; nothing is sent to Spotify (for a Spotify Synced
+/// playlist the alternative exists only in Branflakes).
+#[tauri::command]
+pub fn alternatives_add(
+    state: S<'_>,
+    playlist_id: String,
+    original_track_id: String,
+    alternative_track_id: String,
+    position: Option<usize>,
+) -> AppResult<crate::db::alternatives::AddAlternativeOutcome> {
+    let conn = state.conn();
+    let original = library::get_track(&conn, &original_track_id)?;
+    let alternative = library::get_track(&conn, &alternative_track_id)?;
+    crate::db::alternatives::add(&conn, &playlist_id, &original, &alternative, position)
+}
+
+#[tauri::command]
+pub fn alternatives_list(state: S<'_>, playlist_id: String) -> AppResult<Vec<crate::db::alternatives::Relation>> {
+    crate::db::alternatives::list(&state.conn(), &playlist_id)
+}
+
 
 // ============================================================= soundcloud
 
@@ -936,6 +1438,9 @@ pub fn lastfm_clear_failed(state: S<'_>) -> AppResult<()> {
 
 #[tauri::command]
 pub fn media_update(state: S<'_>, update: MediaUpdate) -> AppResult<()> {
+    if let Some(t) = state.taskbar.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        t.update(update.toolbar_state());
+    }
     if let Some(m) = state.media.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         m.update(update);
     }
@@ -949,5 +1454,6 @@ pub fn app_info(state: S<'_>) -> AppResult<serde_json::Value> {
         "dataDir": state.paths.data_dir,
         "schemaVersion": db::schema_version(&state.conn())?,
         "mediaControls": state.media.lock().map(|m| m.is_some()).unwrap_or(false),
+        "taskbarControls": state.taskbar.lock().map(|m| m.is_some()).unwrap_or(false),
     }))
 }

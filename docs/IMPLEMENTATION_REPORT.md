@@ -103,7 +103,7 @@ What the frontend tests cover: capability → control resolution. A control is n
 - **Last.fm:** desktop auth with polling, Now Playing, and scrobbling for local tracks only (enforced in the backend). A persistent ordered cache is retried after each play and every 5 minutes. Settings shows queue status and can discard rejected scrobbles.
 - **Windows:**
   - SMTC and media keys through souvlaki on a dedicated thread. Chromium's own media-key handling is disabled to avoid double handling. SMTC events are filtered through the resolved controls.
-  - desktop notifications on track change when the window is unfocused (toggleable)
+  - ~~desktop notifications on track change~~ removed on 15 Nov 2026 (see §4c)
   - NSIS (per-user, with uninstaller) and MSI installers, with a WebView2 bootstrapper
 - **Engineering:**
   - explicit `AppError` kinds sent to the UI
@@ -136,13 +136,70 @@ No real Spotify, SoundCloud or Last.fm credentials were available. These paths f
   - The page has **Add songs** (library, or a Spotify/SoundCloud search), a track sort (custom order by default), duration and source summary, and an empty state.
   - Migration `0002` adds `playlists.artwork_path` and `last_played_at`. "Played" means playback was started from the playlist page.
 
+## 4c. Version 0.2.0: taskbar controls, Spotify playlist sync, notification removal (15–16 Nov 2026)
+
+- **Taskbar thumbnail toolbar:**
+  - Previous / Play-Pause / Next buttons via `ITaskbarList3` (`taskbar.rs`), feeding the existing `media-control` path. SMTC is unchanged.
+- **Spotify playlist sync:**
+  - two-way items, order, name and cover (`sync/`, migration 0004)
+  - a backend scheduler (5 min default, configurable), manual and "sync all"
+  - the Branflakes-only copy rule for non-Spotify tracks, enforced in `playlist_add_tracks`
+- **Playback notifications removed:**
+  - `src/lib/notify.ts` and its call in `store.ts`, the `ui.notifications_enabled` setting and Settings toggle, `tauri-plugin-notification` (Rust crate, npm package, `notification:default` capability)
+  - in-app toasts (sonner) are unaffected
+- **Tests:**
+  - `cargo test -- --include-ignored`: **133 passed** (64 new), including a real Windows 11 window test of the toolbar and a real Credential Manager isolation test
+  - Vitest: **25 passed** (12 new)
+  - `tsc` clean
+- **Verified in the real app on Windows 11** (debug build, isolated data directory):
+  - migrations 1–4 apply
+  - toolbar buttons are added exactly once to the real taskbar button (via the fallback timer, because `TaskbarButtonCreated` preceded the subclass)
+  - posted thumbnail-button clicks are handled while minimised and after restore without errors
+  - the app closes cleanly
+- **Review fixes (16 Nov 2026):**
+  - Forks are reconciled with Spotify's current contents (read-only) before copying, with a clearly labelled last-sync fallback.
+  - Entries that weren't copied are listed on the copy.
+  - The cover identity no longer depends on the URL host or size, and a manual sync verifies the cover by content.
+  - The in-app Spotify device is no longer blocked from auto-starting because the playlist-sync scopes are missing (`ProviderStatus.missingScopes`).
+  - A reconnect prompt appears on synced playlist pages.
+  - Credentials are stored under the running app's identifier. The release app keeps `com.unifiedmusic.desktop`, so existing sign-ins are unaffected, and a test build with another identifier can no longer read or overwrite them.
+- **Manual acceptance testing** on Windows 11 with a separate acceptance build was reported as passed by the project owner (16 Nov 2026).
+- **Not verified live:**
+  - The hover thumbnail was not inspected by eye. Doing that would have needed synthetic mouse input on an in-use desktop.
+  - No Spotify account was used. The sync is covered by tests against a stateful fake of the documented endpoints.
+
+## 4d. Version 0.2.1: playlist lifecycle and Find alternative (16 Nov 2026)
+
+- **Imports and duplicates:**
+  - Imported Spotify playlists are synced automatically, including earlier imports in the background.
+  - Stale duplicate copies are replaced; user-modified copies and forks are never removed.
+- **Creating and linking:**
+  - New playlists are local-only by default, with an explicit option to create them on Spotify (private).
+  - Existing local playlists can be linked explicitly.
+  - Retrying a creation never duplicates.
+- **Deleting:** synced playlists need an explicit confirmation dialog. Spotify has no permanent delete, so owned playlists are removed from the library and others are unfollowed. Local data is removed only after Spotify confirms; interrupted deletions resume safely.
+- **External removal:** detected with a two-check confirmation. Temporary errors never count.
+- **Find alternative:**
+  - Searches local files, then SoundCloud.
+  - Adds the pick right after the original, which stays.
+  - The choice is remembered and survives syncs.
+- **Fix:** POST requests are no longer retried after ambiguous failures (they could duplicate playlists or tracks).
+- **Migration 0005:** additive only.
+- **Tests:**
+  - Rust **157 passed** + 2 ignored real-Windows tests (run separately; both pass).
+  - Vitest **42 passed**.
+  - `tsc` clean.
+- **Not verified live:**
+  - Nothing has been run against a real Spotify account. In particular, whether `DELETE /me/library` works for **private** playlists with `playlist-modify-private` alone is not documented (Spotify lists `playlist-modify-public`), and the 404 behaviour of `GET /playlists/{id}` isn't documented.
+  - SoundCloud search was tested with mocks only.
+
 ## 5. Not implemented / known limitations
 
 - **Gapless playback, crossfade, and mixing sources:** intentionally not supported.
 - **Spotify audio inside the app:** not possible through approved means beyond the SDK path above. Spotify playback needs a Spotify Connect device.
 - **SoundCloud custom-URL-scheme redirect** (deep link) as a fallback if loopback redirects are refused. Not implemented.
 - **Output device selection** for local and SoundCloud playback (`setSinkId`). Not implemented; declared as unsupported.
-- **Writing back to providers:** saving or liking on Spotify or SoundCloud, and editing provider playlists. Library and playlist changes are app-local.
+- **Writing back to providers:** saving or liking on Spotify or SoundCloud, and editing SoundCloud playlists. Spotify playlists are written only when Spotify Synced (§4c); other playlist changes are app-local.
 - **Re-import removals:** tracks un-saved on Spotify or un-liked on SoundCloud are not removed from the app library on re-import. Imported playlists are refreshed in full.
 - **Folder watching:** none; rescans are manual. A file modified while the app runs is picked up on the next rescan (size and mtime check).
 - **Editing a playing file** may fail with "file in use"; the UI warns about this.

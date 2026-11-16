@@ -17,6 +17,11 @@ pub struct RetryPolicy {
     pub max_attempts: u32,
     pub base_delay: Duration,
     pub max_retry_after: Duration,
+    /// Retry after a 5xx or a failure mid-request. Must be false for
+    /// non-idempotent requests (e.g. "create playlist", "add items"): the
+    /// server may already have applied them. 429 and connection failures
+    /// (request never sent) are always retried.
+    pub retry_ambiguous: bool,
 }
 
 impl Default for RetryPolicy {
@@ -25,6 +30,7 @@ impl Default for RetryPolicy {
             max_attempts: 4,
             base_delay: Duration::from_millis(500),
             max_retry_after: Duration::from_secs(30),
+            retry_ambiguous: true,
         }
     }
 }
@@ -36,7 +42,13 @@ impl RetryPolicy {
             max_attempts: 3,
             base_delay: Duration::from_millis(1),
             max_retry_after: Duration::from_millis(5),
+            retry_ambiguous: true,
         }
+    }
+
+    /// The same policy for a non-idempotent request.
+    pub fn non_idempotent(self) -> Self {
+        RetryPolicy { retry_ambiguous: false, ..self }
     }
 }
 
@@ -87,7 +99,7 @@ where
                     tokio::time::sleep(wait).await;
                     continue;
                 }
-                if status.is_server_error() && !last {
+                if status.is_server_error() && !last && policy.retry_ambiguous {
                     let wait = policy.base_delay * 2u32.pow(attempt - 1);
                     log::warn!("{provider}: server error {status}, retrying in {wait:?}");
                     tokio::time::sleep(wait).await;
@@ -96,7 +108,8 @@ where
                 return Err(error_from_response(provider, resp).await);
             }
             Err(e) => {
-                if last {
+                // Not sent at all (connection refused etc.) is always safe to retry.
+                if last || (!policy.retry_ambiguous && !e.is_connect()) {
                     return Err(AppError::Network {
                         provider: provider.into(),
                         message: sanitize_reqwest_error(&e),
@@ -232,6 +245,24 @@ mod tests {
         }
         let e = send("spotify", RetryPolicy::immediate(), || c.get(format!("{}/p", server.url()))).await.unwrap_err();
         assert!(matches!(e, AppError::PremiumRequired { .. }));
+    }
+
+    #[tokio::test]
+    async fn non_idempotent_requests_are_not_retried_after_5xx() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server.mock("POST", "/c").with_status(503).expect(1).create_async().await;
+        let c = client();
+        let url = format!("{}/c", server.url());
+        let err = send("x", RetryPolicy::immediate().non_idempotent(), || c.post(&url)).await.unwrap_err();
+        assert!(matches!(err, AppError::Http { status: 503, .. }));
+        m.assert_async().await;
+        // 429 is still retried (the request was not processed).
+        let limited = server.mock("POST", "/r").with_status(429).with_header("retry-after", "0").expect(1).create_async().await;
+        let ok = server.mock("POST", "/r").with_status(201).create_async().await;
+        let url = format!("{}/r", server.url());
+        send("x", RetryPolicy::immediate().non_idempotent(), || c.post(&url)).await.unwrap();
+        limited.assert_async().await;
+        ok.assert_async().await;
     }
 
     #[test]

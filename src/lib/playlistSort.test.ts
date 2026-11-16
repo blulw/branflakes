@@ -10,6 +10,10 @@ const pl = (name: string, created: string, lastPlayed: string | null, count = 0)
   trackCount: count,
   artworkPath: null,
   lastPlayedAt: lastPlayed,
+  sync: null,
+  forkedFrom: null,
+  forkedFromName: null,
+  forkNote: null,
   createdAt: created,
   updatedAt: created,
 });

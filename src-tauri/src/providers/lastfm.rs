@@ -119,6 +119,7 @@ impl LastFmAdapter {
             configured,
             connected,
             needs_reconnect: false,
+            missing_scopes: Vec::new(),
             account_name: account,
             capabilities: PlaybackCapabilities::NONE,
             limitations: vec![

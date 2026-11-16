@@ -5,7 +5,6 @@ import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { api, toApiError } from "@/lib/api";
 import { artworkForSystem } from "@/lib/format";
-import { notifyTrack } from "@/lib/notify";
 import type {
   PlaybackCapabilities,
   ProviderStatus,
@@ -80,6 +79,25 @@ let lastPersist = 0;
 let lastMediaPush = 0;
 let consecutiveSkips = 0;
 let volumeTimer: number | null = null;
+let lastMediaFlags = "";
+let usePlayer_subscribe: (() => () => void) | null = null;
+
+/** Scopes the Web Playback SDK checks. Other missing scopes (e.g. playlist sync) don't affect it. */
+export const SDK_SCOPES = ["streaming", "user-read-email", "user-read-private"];
+
+export function sdkScopesMissing(sp: Pick<ProviderStatus, "missingScopes">): boolean {
+  return (sp.missingScopes ?? []).some((s) => SDK_SCOPES.includes(s));
+}
+
+/** Which transport actions the active source allows right now (taskbar toolbar). */
+export function mediaFlags(s: Pick<PlayerState, "controls" | "status">) {
+  const c = s.controls();
+  return { canPrevious: c.previous.enabled, canPlayPause: c.playPause.enabled, canNext: c.next.enabled, playing: s.status === "playing" };
+}
+
+function mediaFlagsKey(f: ReturnType<typeof mediaFlags>): string {
+  return `${+f.canPrevious}${+f.canPlayPause}${+f.canNext}${+f.playing}`;
+}
 
 const NO_CAPS: PlaybackCapabilities = {
   play: false,
@@ -164,8 +182,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
   function pushMedia() {
     const s = get();
     const t = s.currentTrack();
+    const flags = mediaFlags(s);
+    lastMediaFlags = mediaFlagsKey(flags);
     if (!t) {
-      void api.mediaUpdate({ status: "stopped" }).catch(() => undefined);
+      void api.mediaUpdate({ status: "stopped", ...flags }).catch(() => undefined);
       return;
     }
     void api
@@ -177,9 +197,19 @@ export const usePlayer = create<PlayerState>((set, get) => {
         durationMs: s.durationMs ?? t.durationMs ?? undefined,
         status: s.status === "playing" ? "playing" : s.status === "paused" ? "paused" : "stopped",
         positionMs: Math.round(s.positionMs),
+        ...flags,
       })
       .catch(() => undefined);
   }
+
+  // Queue edits, provider status or Spotify device changes can enable or
+  // disable previous/next without a track change. Push only when the
+  // resolved flags actually change (no polling).
+  usePlayer_subscribe = () =>
+    usePlayer.subscribe((s) => {
+      const key = mediaFlagsKey(mediaFlags(s));
+      if (key !== lastMediaFlags) pushMedia();
+    });
 
   async function finalizeScrobble() {
     const sess = scrobble;
@@ -229,7 +259,6 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (autoplay) {
         scrobble = { trackId: track.id, source: track.source, startedAt: Math.floor(Date.now() / 1000), playedMs: 0, lastPos: startMs };
         void api.lastfmNowPlaying(track.id).catch(() => undefined);
-        void notifyTrack(track);
       }
       pushMedia();
     } catch (e) {
@@ -304,6 +333,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
             break;
         }
       });
+      usePlayer_subscribe?.();
+      pushMedia();
       window.addEventListener("beforeunload", () => {
         void persist();
       });
@@ -509,7 +540,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       }
       // On startup, only restore the device if the user enabled it before and
       // the sign-in already has the required permissions.
-      if (automatic && (!sdkPreferred() || sp.needsReconnect)) return false;
+      if (automatic && (!sdkPreferred() || sdkScopesMissing(sp))) return false;
       const r = await startSdkDevice();
       if (r.ok) {
         get().setSdkDevice(r.deviceId);

@@ -20,6 +20,9 @@ interface UiState {
   playlists: Playlist[];
   settings: AppSettings | null;
   editing: Track | null;
+  /** Playlists with a Spotify sync running right now (from backend events). */
+  syncing: Record<string, boolean>;
+  setSyncing(id: string, on: boolean): void;
   navigate(v: View): void;
   bumpLibrary(): void;
   refreshPlaylists(): Promise<void>;
@@ -33,6 +36,8 @@ export const useUi = create<UiState>((set) => ({
   playlists: [],
   settings: null,
   editing: null,
+  syncing: {},
+  setSyncing: (id, on) => set((s) => ({ syncing: { ...s.syncing, [id]: on } })),
   navigate: (view) => set({ view }),
   bumpLibrary: () => set((s) => ({ libraryVersion: s.libraryVersion + 1 })),
   async refreshPlaylists() {

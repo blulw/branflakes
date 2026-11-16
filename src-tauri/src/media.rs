@@ -23,6 +23,25 @@ pub struct MediaUpdate {
     /// "playing" | "paused" | "stopped"
     pub status: String,
     pub position_ms: Option<u64>,
+    /// Whether the active source currently allows each action, as resolved by
+    /// the frontend controller. Used by the taskbar thumbnail toolbar.
+    #[serde(default)]
+    pub can_previous: bool,
+    #[serde(default)]
+    pub can_play_pause: bool,
+    #[serde(default)]
+    pub can_next: bool,
+}
+
+impl MediaUpdate {
+    pub fn toolbar_state(&self) -> crate::taskbar::ToolbarState {
+        crate::taskbar::ToolbarState {
+            playing: self.status == "playing",
+            can_previous: self.can_previous,
+            can_play_pause: self.can_play_pause,
+            can_next: self.can_next,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

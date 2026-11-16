@@ -34,7 +34,17 @@ pub const SCOPES: &[&str] = &[
     "streaming",
     "user-read-email",
     "user-read-private",
+    // Two-way playlist sync (Change Playlist Details, /items writes) and
+    // custom playlist covers.
+    "playlist-modify-public",
+    "playlist-modify-private",
+    "ugc-image-upload",
 ];
+
+/// Scopes needed to write to playlists (sync).
+pub const PLAYLIST_WRITE_SCOPES: &[&str] = &["playlist-modify-public", "playlist-modify-private"];
+/// Scope needed to upload a custom playlist cover.
+pub const IMAGE_UPLOAD_SCOPE: &str = "ugc-image-upload";
 
 /// Scopes the Web Playback SDK checks for. Spotify's official SDK example
 /// requests exactly these; with fewer, the SDK reports
@@ -46,6 +56,9 @@ pub fn missing_scopes(granted: &str, required: &[&'static str]) -> Vec<&'static 
     let have: std::collections::HashSet<&str> = granted.split_whitespace().collect();
     required.iter().copied().filter(|s| !have.contains(s)).collect()
 }
+
+/// Spotify's limit for the base64 cover upload payload.
+pub const COVER_MAX_BASE64: usize = 256 * 1024;
 
 /// Development Mode maximum for `GET /search` `limit`.
 pub const SEARCH_LIMIT: u32 = 10;
@@ -102,6 +115,40 @@ pub struct SpotifyPlaylistSummary {
     pub name: String,
     pub owner_id: Option<String>,
     pub total: Option<u32>,
+    pub collaborative: bool,
+}
+
+/// `GET /playlists/{id}` metadata used by sync (no items).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaylistMeta {
+    pub id: String,
+    pub name: String,
+    pub snapshot_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub collaborative: bool,
+    /// Cover URLs, largest first. Spotify says these expire within a day.
+    pub images: Vec<String>,
+}
+
+/// One entry of a playlist, in Spotify's order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteItem {
+    /// `spotify:track:…`, `spotify:episode:…`, `spotify:local:…`, or
+    /// `spotify:unavailable:<offset>` when Spotify returned no item.
+    pub uri: String,
+    /// Mapped track for `spotify:track:` items.
+    pub track: Option<TrackUpsert>,
+    /// Display name, when Spotify returned one (used to report entries that
+    /// Branflakes can't copy).
+    pub name: Option<String>,
+}
+
+/// Request body for an authorised call.
+enum Body<'a> {
+    None,
+    Json(&'a Value),
+    /// Raw text with an explicit content type (cover upload).
+    Raw(&'static str, &'a str),
 }
 
 pub struct SpotifyAdapter {
@@ -149,7 +196,8 @@ impl SpotifyAdapter {
 
     pub fn status(&self, configured: bool, account: Option<String>, premium_denied: bool) -> ProviderStatus {
         let connected = self.secrets.has(SPOTIFY_TOKENS);
-        let needs_reconnect = connected && !self.stored_missing_scopes().is_empty();
+        let missing: Vec<String> = if connected { self.stored_missing_scopes().iter().map(|s| s.to_string()).collect() } else { Vec::new() };
+        let needs_reconnect = !missing.is_empty();
         let mut limitations = vec![
             "Playback control requires Spotify Premium (Spotify returns PREMIUM_REQUIRED otherwise).".into(),
             "Playback happens on a Spotify Connect device (phone, speaker, web player, etc.). This app sends documented Web API commands; it never downloads, extracts or decodes Spotify audio.".into(),
@@ -162,7 +210,10 @@ impl SpotifyAdapter {
             limitations.insert(0, "Spotify reported that this account does not have Premium: playback controls are disabled.".into());
         }
         if needs_reconnect {
-            limitations.insert(0, "This sign-in is missing permissions the app now needs (required by the in-app device). Click Reconnect Spotify.".into());
+            limitations.insert(
+                0,
+                "This sign-in is missing permissions the app now needs (for the in-app device and Spotify playlist sync). Click Reconnect Spotify.".into(),
+            );
         }
         ProviderStatus {
             provider: PROVIDER.into(),
@@ -170,6 +221,7 @@ impl SpotifyAdapter {
             configured,
             connected,
             needs_reconnect,
+            missing_scopes: missing,
             account_name: account,
             capabilities: Self::capabilities(connected, premium_denied),
             limitations,
@@ -324,16 +376,34 @@ impl SpotifyAdapter {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> AppResult<Option<Value>> {
+        let body = match body {
+            Some(b) => Body::Json(b),
+            None => Body::None,
+        };
+        self.request_with(client_id, method, path, query, body).await
+    }
+
+    async fn request_with(
+        &self,
+        client_id: &str,
+        method: reqwest::Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Body<'_>,
+    ) -> AppResult<Option<Value>> {
         let url = if path.starts_with("http") { path.to_string() } else { format!("{}{}", self.api_base, path) };
         for attempt in 0..2 {
             let token = self.access_token(client_id).await?;
-            let res = http::send(PROVIDER, self.policy, || {
+            // POST creates or appends on Spotify: never blindly repeat it.
+            let policy = if method == reqwest::Method::POST { self.policy.non_idempotent() } else { self.policy };
+            let res = http::send(PROVIDER, policy, || {
                 let mut rb = self.http.request(method.clone(), &url).bearer_auth(token.expose()).query(query);
-                rb = match body {
-                    Some(b) => rb.json(b),
+                rb = match &body {
+                    Body::Json(b) => rb.json(b),
+                    Body::Raw(ct, text) => rb.header(reqwest::header::CONTENT_TYPE, *ct).body(text.to_string()),
                     // Spotify player PUT/POST endpoints expect a Content-Length.
-                    None if method != reqwest::Method::GET => rb.header(reqwest::header::CONTENT_LENGTH, 0),
-                    None => rb,
+                    Body::None if method != reqwest::Method::GET => rb.header(reqwest::header::CONTENT_LENGTH, 0),
+                    Body::None => rb,
                 };
                 rb
             })
@@ -475,6 +545,7 @@ impl SpotifyAdapter {
                             .or_else(|| p.pointer("/tracks/total"))
                             .and_then(Value::as_u64)
                             .map(|n| n as u32),
+                        collaborative: p.get("collaborative").and_then(Value::as_bool).unwrap_or(false),
                     });
                 }
             }
@@ -510,6 +581,218 @@ impl SpotifyAdapter {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(Self::map_track).collect())
             .unwrap_or_default())
+    }
+
+    /// Scopes from `required` that the stored sign-in lacks.
+    pub fn missing_granted_scopes(&self, required: &[&'static str]) -> Vec<&'static str> {
+        match self.secrets.get(SPOTIFY_TOKENS) {
+            Ok(Some(raw)) => match serde_json::from_str::<SpotifyTokens>(&raw) {
+                Ok(t) => missing_scopes(&t.scope, required),
+                Err(_) => required.to_vec(),
+            },
+            _ => required.to_vec(),
+        }
+    }
+
+    // ------------------------------------------------- playlist sync
+
+    fn playlist_path(id: &str, rest: &str) -> String {
+        format!("/playlists/{}{rest}", urlencoding::encode(id))
+    }
+
+    fn snapshot_of(v: Option<Value>) -> Option<String> {
+        v.and_then(|v| v.get("snapshot_id").and_then(Value::as_str).map(String::from))
+    }
+
+    /// Cheap metadata read: name, version, owner and cover, no items.
+    pub async fn playlist_meta(&self, client_id: &str, playlist_id: &str) -> AppResult<PlaylistMeta> {
+        let v = self
+            .get(
+                client_id,
+                &Self::playlist_path(playlist_id, ""),
+                &[("fields", "id,name,snapshot_id,collaborative,owner(id),images".into())],
+            )
+            .await?;
+        let name = v.get("name").and_then(Value::as_str).ok_or_else(|| AppError::Http {
+            provider: PROVIDER.into(),
+            status: 502,
+            message: "playlist response did not include a name".into(),
+        })?;
+        Ok(PlaylistMeta {
+            id: v.get("id").and_then(Value::as_str).unwrap_or(playlist_id).to_string(),
+            name: name.to_string(),
+            snapshot_id: v.get("snapshot_id").and_then(Value::as_str).map(String::from),
+            owner_id: v.pointer("/owner/id").and_then(Value::as_str).map(String::from),
+            collaborative: v.get("collaborative").and_then(Value::as_bool).unwrap_or(false),
+            images: v
+                .get("images")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|i| i.get("url").and_then(Value::as_str).map(String::from)).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Every entry of a playlist in order, including entries Branflakes
+    /// can't hold. Fails (rather than returning a partial list) if the pages
+    /// don't add up to Spotify's `total`, so a short response is never
+    /// mistaken for removals.
+    pub async fn playlist_items_all(&self, client_id: &str, playlist_id: &str) -> AppResult<Vec<RemoteItem>> {
+        let path = Self::playlist_path(playlist_id, "/items");
+        let mut out: Vec<RemoteItem> = Vec::new();
+        let mut v = self.get(client_id, &path, &[("limit", "50".into()), ("market", "from_token".into())]).await?;
+        let mut total: Option<u64> = None;
+        loop {
+            let page_total = v.get("total").and_then(Value::as_u64);
+            match (total, page_total) {
+                (None, t) => total = t,
+                (Some(a), Some(b)) if a != b => {
+                    return Err(AppError::Other("the Spotify playlist changed while it was being read; will retry".into()));
+                }
+                _ => {}
+            }
+            let Some(items) = v.get("items").and_then(Value::as_array) else {
+                return Err(AppError::Http { provider: PROVIDER.into(), status: 502, message: "playlist items response had no items".into() });
+            };
+            for it in items {
+                let obj = it.get("item").or_else(|| it.get("track")).filter(|o| !o.is_null());
+                let offset = out.len();
+                let uri = obj.and_then(|o| o.get("uri")).and_then(Value::as_str).map(String::from);
+                let item = match (obj, uri) {
+                    (Some(o), Some(uri)) => {
+                        let track = if uri.starts_with("spotify:track:") { Self::map_track(o) } else { None };
+                        // A track URI that we can't map is kept as foreign.
+                        let uri = if uri.starts_with("spotify:track:") && track.is_none() && !uri.starts_with("spotify:local:") {
+                            format!("spotify:unavailable:{offset}")
+                        } else {
+                            uri
+                        };
+                        let name = o.get("name").and_then(Value::as_str).map(String::from);
+                        RemoteItem { uri, track, name }
+                    }
+                    _ => RemoteItem { uri: format!("spotify:unavailable:{offset}"), track: None, name: None },
+                };
+                out.push(item);
+            }
+            match v.get("next").and_then(Value::as_str) {
+                Some(next) => v = self.get(client_id, next, &[]).await?,
+                None => break,
+            }
+        }
+        if let Some(t) = total {
+            if out.len() as u64 != t {
+                return Err(AppError::Other(format!(
+                    "Spotify returned {} of {t} playlist items; nothing was changed and the sync will retry",
+                    out.len()
+                )));
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn playlist_add_items(&self, client_id: &str, playlist_id: &str, uris: &[String], position: Option<usize>) -> AppResult<Option<String>> {
+        let mut body = serde_json::json!({ "uris": uris });
+        if let Some(p) = position {
+            body["position"] = Value::from(p);
+        }
+        let v = self.request(client_id, reqwest::Method::POST, &Self::playlist_path(playlist_id, "/items"), &[], Some(&body)).await?;
+        Ok(Self::snapshot_of(v))
+    }
+
+    /// Removes every occurrence of each URI.
+    pub async fn playlist_remove_items(&self, client_id: &str, playlist_id: &str, uris: &[String], snapshot_id: Option<&str>) -> AppResult<Option<String>> {
+        let items: Vec<Value> = uris.iter().map(|u| serde_json::json!({ "uri": u })).collect();
+        let mut body = serde_json::json!({ "items": items });
+        if let Some(s) = snapshot_id {
+            body["snapshot_id"] = Value::from(s);
+        }
+        let v = self.request(client_id, reqwest::Method::DELETE, &Self::playlist_path(playlist_id, "/items"), &[], Some(&body)).await?;
+        Ok(Self::snapshot_of(v))
+    }
+
+    pub async fn playlist_move_item(
+        &self,
+        client_id: &str,
+        playlist_id: &str,
+        range_start: usize,
+        insert_before: usize,
+        snapshot_id: Option<&str>,
+    ) -> AppResult<Option<String>> {
+        let mut body = serde_json::json!({ "range_start": range_start, "insert_before": insert_before, "range_length": 1 });
+        if let Some(s) = snapshot_id {
+            body["snapshot_id"] = Value::from(s);
+        }
+        let v = self.request(client_id, reqwest::Method::PUT, &Self::playlist_path(playlist_id, "/items"), &[], Some(&body)).await?;
+        Ok(Self::snapshot_of(v))
+    }
+
+    /// Replace all items (≤ 100 URIs).
+    pub async fn playlist_replace_items(&self, client_id: &str, playlist_id: &str, uris: &[String]) -> AppResult<Option<String>> {
+        let body = serde_json::json!({ "uris": uris });
+        let v = self.request(client_id, reqwest::Method::PUT, &Self::playlist_path(playlist_id, "/items"), &[], Some(&body)).await?;
+        Ok(Self::snapshot_of(v))
+    }
+
+    /// Change Playlist Details (owner only).
+    pub async fn playlist_rename(&self, client_id: &str, playlist_id: &str, name: &str) -> AppResult<()> {
+        let body = serde_json::json!({ "name": name });
+        self.request(client_id, reqwest::Method::PUT, &Self::playlist_path(playlist_id, ""), &[], Some(&body)).await.map(|_| ())
+    }
+
+    /// Upload a custom cover: base64 JPEG, at most 256 KB.
+    pub async fn playlist_upload_cover(&self, client_id: &str, playlist_id: &str, jpeg_base64: &str) -> AppResult<()> {
+        if jpeg_base64.len() > COVER_MAX_BASE64 {
+            return Err(AppError::InvalidInput("cover image is larger than Spotify's 256 KB limit".into()));
+        }
+        self.request_with(client_id, reqwest::Method::PUT, &Self::playlist_path(playlist_id, "/images"), &[], Body::Raw("image/jpeg", jpeg_base64))
+            .await
+            .map(|_| ())
+    }
+
+    /// Download a cover image (public CDN URL; no token is sent).
+    pub async fn fetch_image(&self, url: &str) -> AppResult<Vec<u8>> {
+        if !url.starts_with("https://") && !url.starts_with(&self.api_base) {
+            return Err(AppError::InvalidInput("refusing to fetch a non-https image".into()));
+        }
+        let resp = http::send(PROVIDER, self.policy, || self.http.get(url)).await?;
+        let bytes = resp.bytes().await.map_err(|e| AppError::Network { provider: PROVIDER.into(), message: http::sanitize_reqwest_error(&e) })?;
+        if bytes.len() > 10 * 1024 * 1024 {
+            return Err(AppError::InvalidInput("cover image is unexpectedly large".into()));
+        }
+        Ok(bytes.to_vec())
+    }
+
+    // ------------------------------------------------ playlist lifecycle
+
+    /// `POST /me/playlists`. Created **private** (Spotify's default is public).
+    /// Returns (playlist id, snapshot id).
+    pub async fn playlist_create(&self, client_id: &str, name: &str) -> AppResult<(String, Option<String>)> {
+        let body = serde_json::json!({ "name": name, "public": false });
+        let v = self.request(client_id, reqwest::Method::POST, "/me/playlists", &[], Some(&body)).await?.unwrap_or(Value::Null);
+        let id = v.get("id").and_then(Value::as_str).ok_or_else(|| AppError::Http {
+            provider: PROVIDER.into(),
+            status: 502,
+            message: "Spotify did not return the new playlist's id".into(),
+        })?;
+        Ok((id.to_string(), v.get("snapshot_id").and_then(Value::as_str).map(String::from)))
+    }
+
+    /// Remove a playlist from the user's library (`DELETE /me/library`).
+    /// Spotify has no endpoint that permanently deletes a playlist; for the
+    /// owner this is exactly what "Delete" does in Spotify's own apps.
+    pub async fn library_remove_playlist(&self, client_id: &str, playlist_id: &str) -> AppResult<()> {
+        let q = [("uris", format!("spotify:playlist:{playlist_id}"))];
+        self.request(client_id, reqwest::Method::DELETE, "/me/library", &q, None).await.map(|_| ())
+    }
+
+    /// Is the playlist in the user's library (`GET /me/library/contains`)?
+    /// An unexpected response shape is an error, never "false".
+    pub async fn library_contains_playlist(&self, client_id: &str, playlist_id: &str) -> AppResult<bool> {
+        let q = [("uris", format!("spotify:playlist:{playlist_id}"))];
+        let v = self.get(client_id, "/me/library/contains", &q).await?;
+        match v.as_array().map(|a| a.as_slice()) {
+            Some([Value::Bool(b)]) => Ok(*b),
+            _ => Err(AppError::Http { provider: PROVIDER.into(), status: 502, message: "unexpected response from Spotify's library check".into() }),
+        }
     }
 
     // ---------------------------------------------------------- player
@@ -618,7 +901,14 @@ mod tests {
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["code_challenge"], "CH");
         assert_eq!(q["response_type"], "code");
-        assert!(q["scope"].contains("user-modify-playback-state"));
+        // Every scope, including the playlist-sync ones, is requested at sign-in.
+        let requested: Vec<&str> = q["scope"].split(' ').collect();
+        for s in SCOPES {
+            assert!(requested.contains(s), "{s} not requested");
+        }
+        for s in ["playlist-modify-public", "playlist-modify-private", "ugc-image-upload"] {
+            assert!(requested.contains(&s), "{s} not requested");
+        }
         assert!(!q.contains_key("client_secret"));
     }
 
@@ -786,6 +1076,21 @@ mod tests {
         assert!(!a.status(true, None, false).needs_reconnect);
     }
 
+    #[test]
+    fn pre_sync_sign_in_is_flagged_for_reconnect_without_breaking_the_sdk() {
+        // Exactly the scopes requested before playlist sync existed.
+        let old = "user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read playlist-read-private playlist-read-collaborative streaming user-read-email user-read-private";
+        let store = Arc::new(MemoryStore::default());
+        let t = SpotifyTokens { access_token: Secret::new("AT"), refresh_token: Some(Secret::new("RT")), expires_at: 0, scope: old.into() };
+        store.set(SPOTIFY_TOKENS, &serde_json::to_string(&t).unwrap()).unwrap();
+        let a = SpotifyAdapter::with_base(http::client(), store, "x", "y", RetryPolicy::immediate());
+        let st = a.status(true, None, false);
+        assert!(st.needs_reconnect);
+        assert_eq!(st.missing_scopes, vec!["playlist-modify-public", "playlist-modify-private", "ugc-image-upload"]);
+        assert!(st.limitations[0].contains("Reconnect Spotify"));
+        assert!(st.missing_scopes.iter().all(|s| !SDK_SCOPES.contains(&s.as_str())), "in-app player still works");
+    }
+
     #[tokio::test]
     async fn refresh_keeps_scope_when_omitted() {
         let mut server = mockito::Server::new_async().await;
@@ -801,6 +1106,99 @@ mod tests {
         a.access_token("cid").await.unwrap();
         let saved: SpotifyTokens = serde_json::from_str(&store.get(SPOTIFY_TOKENS).unwrap().unwrap()).unwrap();
         assert_eq!(saved.scope, SCOPES.join(" "));
+    }
+
+    #[tokio::test]
+    async fn playlist_items_keep_foreign_entries_and_reject_short_reads() {
+        let mut server = mockito::Server::new_async().await;
+        let (a, store) = adapter(&server);
+        seed_tokens(&store, 3600);
+        let m = server
+            .mock("GET", "/v1/playlists/p1/items")
+            .match_query(Matcher::Any)
+            .with_body(
+                r#"{"total":4,"next":null,"items":[
+                    {"item":{"type":"track","id":"a","uri":"spotify:track:a","name":"A","artists":[],"album":{}}},
+                    {"is_local":true,"item":{"type":"track","id":null,"uri":"spotify:local:x:y:z:1","name":"L","is_local":true}},
+                    {"item":null},
+                    {"item":{"type":"episode","id":"e","uri":"spotify:episode:e","name":"E"}}]}"#,
+            )
+            .create_async()
+            .await;
+        let items = a.playlist_items_all("cid", "p1").await.unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.uri.as_str()).collect::<Vec<_>>(),
+            ["spotify:track:a", "spotify:local:x:y:z:1", "spotify:unavailable:2", "spotify:episode:e"]
+        );
+        assert!(items[0].track.is_some() && items[1].track.is_none());
+        m.remove_async().await;
+
+        // total says 3 but only 1 item came back: an error, never a partial list.
+        server
+            .mock("GET", "/v1/playlists/p1/items")
+            .match_query(Matcher::Any)
+            .with_body(r#"{"total":3,"next":null,"items":[{"item":{"type":"track","id":"a","uri":"spotify:track:a","name":"A","artists":[],"album":{}}}]}"#)
+            .create_async()
+            .await;
+        assert!(a.playlist_items_all("cid", "p1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn playlist_writes_use_items_endpoints() {
+        let mut server = mockito::Server::new_async().await;
+        let (a, store) = adapter(&server);
+        seed_tokens(&store, 3600);
+        let add = server
+            .mock("POST", "/v1/playlists/p1/items")
+            .match_body(Matcher::Json(serde_json::json!({"uris":["spotify:track:x"],"position":1})))
+            .with_status(201)
+            .with_body(r#"{"snapshot_id":"s2"}"#)
+            .create_async()
+            .await;
+        assert_eq!(a.playlist_add_items("cid", "p1", &["spotify:track:x".into()], Some(1)).await.unwrap().as_deref(), Some("s2"));
+        add.assert_async().await;
+        let del = server
+            .mock("DELETE", "/v1/playlists/p1/items")
+            .match_body(Matcher::Json(serde_json::json!({"items":[{"uri":"spotify:track:x"}],"snapshot_id":"s2"})))
+            .with_body(r#"{"snapshot_id":"s3"}"#)
+            .create_async()
+            .await;
+        assert_eq!(a.playlist_remove_items("cid", "p1", &["spotify:track:x".into()], Some("s2")).await.unwrap().as_deref(), Some("s3"));
+        del.assert_async().await;
+        let mv = server
+            .mock("PUT", "/v1/playlists/p1/items")
+            .match_body(Matcher::PartialJson(serde_json::json!({"range_start":3,"insert_before":0})))
+            .with_body(r#"{"snapshot_id":"s4"}"#)
+            .create_async()
+            .await;
+        assert_eq!(a.playlist_move_item("cid", "p1", 3, 0, None).await.unwrap().as_deref(), Some("s4"));
+        mv.assert_async().await;
+        let ren = server
+            .mock("PUT", "/v1/playlists/p1")
+            .match_body(Matcher::Json(serde_json::json!({"name":"New"})))
+            .with_status(200)
+            .create_async()
+            .await;
+        a.playlist_rename("cid", "p1", "New").await.unwrap();
+        ren.assert_async().await;
+        let img = server
+            .mock("PUT", "/v1/playlists/p1/images")
+            .match_header("content-type", "image/jpeg")
+            .match_body("QUJD")
+            .with_status(202)
+            .create_async()
+            .await;
+        a.playlist_upload_cover("cid", "p1", "QUJD").await.unwrap();
+        img.assert_async().await;
+        let big = "A".repeat(COVER_MAX_BASE64 + 1);
+        assert!(a.playlist_upload_cover("cid", "p1", &big).await.is_err());
+    }
+
+    #[test]
+    fn sign_in_requests_playlist_write_scopes() {
+        for s in PLAYLIST_WRITE_SCOPES.iter().chain([IMAGE_UPLOAD_SCOPE].iter()) {
+            assert!(SCOPES.contains(s), "{s}");
+        }
     }
 
     #[test]

@@ -23,9 +23,11 @@ export interface TrackTableProps {
   showAlbum?: boolean;
   /** Called when the user starts playback from this table. */
   onPlayStart?: () => void;
+  /** Small per-row controls shown after the title (e.g. "Find alternative"). */
+  rowAccessory?: (track: Track, index: number) => ReactNode;
 }
 
-export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty, showAlbum = true, onPlayStart }: TrackTableProps) {
+export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty, showAlbum = true, onPlayStart, rowAccessory }: TrackTableProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(800);
@@ -98,7 +100,7 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
                   "group grid items-center gap-3 px-4 text-sm hover:bg-accent/60",
                   cols,
                   isCurrent && "bg-primary/10",
-                  unavailable && "opacity-50",
+                  unavailable && "[&_.dim]:opacity-50",
                 )}
               >
                 <span className="relative flex justify-end text-xs tabular-nums text-muted-foreground">
@@ -115,21 +117,22 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
                   </button>
                 </span>
                 <div className="flex min-w-0 items-center gap-3">
-                  <Artwork src={t.artwork} className="size-8 shrink-0" />
+                  <Artwork src={t.artwork} className="dim size-8 shrink-0" />
                   <div className="min-w-0">
                     <div className={cn("flex items-center gap-1.5 truncate font-medium", isCurrent && "text-primary")}>
-                      <span className="truncate">{t.title}</span>
+                      <span className="dim truncate">{t.title}</span>
                       {unavailable && <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-label="Unavailable" />}
                       {t.availability === "preview_only" && <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">PREVIEW</span>}
+                      {rowAccessory?.(t, i)}
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">{t.artist || "Unknown artist"}</div>
+                    <div className="dim truncate text-xs text-muted-foreground">{t.artist || "Unknown artist"}</div>
                   </div>
                 </div>
-                {showAlbum && <span className="truncate text-muted-foreground">{t.album}</span>}
-                <span>
+                {showAlbum && <span className="dim truncate text-muted-foreground">{t.album}</span>}
+                <span className="dim">
                   <SourceBadge source={t.source} />
                 </span>
-                <span className="text-right text-xs tabular-nums text-muted-foreground">{formatDuration(t.durationMs)}</span>
+                <span className="dim text-right text-xs tabular-nums text-muted-foreground">{formatDuration(t.durationMs)}</span>
                 <TrackMenu track={t} extra={extraMenu?.(t, i)}>
                   <Button variant="ghost" size="icon" className="size-8 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Track actions">
                     <MoreHorizontal className="size-4" />

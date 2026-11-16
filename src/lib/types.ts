@@ -50,6 +50,8 @@ export interface ProviderStatus {
   connected: boolean;
   /** Connected, but the sign-in lacks permissions the app now needs. */
   needsReconnect: boolean;
+  /** Permissions the stored sign-in lacks. */
+  missingScopes: string[];
   accountName: string | null;
   capabilities: PlaybackCapabilities;
   limitations: string[];
@@ -94,6 +96,75 @@ export interface Playlist {
   lastPlayedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present only for Spotify Synced playlists. */
+  sync: PlaylistSync | null;
+  /** For a Branflakes-only copy of a synced playlist: the source playlist. */
+  forkedFrom: string | null;
+  forkedFromName: string | null;
+  /** For a copy: what it is based on and which Spotify entries were not copied. */
+  forkNote: string | null;
+}
+
+export interface UncopyableEntry {
+  kind: "spotify_local_file" | "episode" | "unavailable";
+  name: string | null;
+}
+
+export interface PlaylistSync {
+  spotifyPlaylistId: string;
+  status: "pending" | "syncing" | "ok" | "error";
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  lastNotice: string | null;
+  canEditDetails: boolean;
+}
+
+export type AddOutcome =
+  | { kind: "Added"; added: number; skippedDuplicates: number }
+  | {
+      kind: "Forked";
+      playlist: Playlist;
+      added: number;
+      notOnSpotify: number;
+      /** Spotify entries that are not in the copy. */
+      uncopyable: UncopyableEntry[];
+      /** False: Spotify couldn't be checked, so the copy is based on the last sync. */
+      fromLatest: boolean;
+      note: string;
+    };
+
+export interface SyncReport {
+  playlistId: string;
+  pulledAdded: number;
+  pulledRemoved: number;
+  pushedOps: number;
+  renamed: boolean;
+  artworkChanged: boolean;
+  notices: string[];
+}
+
+export interface SyncAllReport {
+  synced: number;
+  failed: string[];
+}
+
+export interface SyncEvent {
+  playlistId: string;
+  /** "removed": deleted/removed on Spotify, Branflakes copy removed. "deleted": deleted from Branflakes (and Spotify). */
+  status: "syncing" | "ok" | "error" | "removed" | "deleted";
+  changed: boolean;
+  message: string | null;
+}
+
+export interface SpotifyPlaylistOption {
+  id: string;
+  name: string;
+  total: number | null;
+  owned: boolean;
+  collaborative: boolean;
+  canSync: boolean;
+  reason: string | null;
+  syncedPlaylistId: string | null;
 }
 
 export type RepeatMode = "off" | "all" | "one";
@@ -198,8 +269,8 @@ export interface AppSettings {
   lastfmSecretSet: boolean;
   lastfmEnabled: boolean;
   lastfmScrobbleSpotify: boolean;
-  notificationsEnabled: boolean;
   oauthPort: number;
+  spotifySyncIntervalMinutes: number;
   spotifyRedirectUri: string;
   soundcloudRedirectUri: string;
   dataDir: string;
@@ -214,8 +285,8 @@ export interface SettingsPatch {
   lastfmSharedSecret?: string;
   lastfmEnabled?: boolean;
   lastfmScrobbleSpotify?: boolean;
-  notificationsEnabled?: boolean;
   oauthPort?: number;
+  spotifySyncIntervalMinutes?: number;
 }
 
 export interface ImportReport {
@@ -223,7 +294,39 @@ export interface ImportReport {
   playlists: number;
   skippedPlaylists: string[];
   errors: string[];
+  /** Imported playlists that are now Spotify Synced. */
+  syncedPlaylists: number;
+  /** Imported as ordinary playlists, with the reason sync isn't available. */
+  notSynced: { name: string; reason: string }[];
 }
+
+export interface CreatePlaylistResult {
+  playlist: Playlist;
+  /** Spotify sync was requested but couldn't be enabled (the playlist is local-only for now). */
+  spotifyError: string | null;
+}
+
+export interface RankedAlternative {
+  track: Track;
+  score: number;
+}
+
+export interface AlternativesResult {
+  candidates: RankedAlternative[];
+  /** The search failed (not the same as "no results"). */
+  error: AppErrorPayload | null;
+  /** The provider isn't set up. */
+  unavailable: string | null;
+}
+
+export interface AlternativeRelation {
+  originalTrackId: string;
+  alternativeTrackId: string;
+  removed: boolean;
+  createdAt: string;
+}
+
+export type AddAlternativeOutcome = { kind: "Added"; position: number } | { kind: "AlreadyAdded"; position: number };
 
 export interface SpotifyDevice {
   id: string | null;
@@ -292,4 +395,8 @@ export interface MediaUpdate {
   durationMs?: number;
   status: "playing" | "paused" | "stopped";
   positionMs?: number;
+  /** Resolved controls, mirrored by the Windows taskbar thumbnail toolbar. */
+  canPrevious?: boolean;
+  canPlayPause?: boolean;
+  canNext?: boolean;
 }

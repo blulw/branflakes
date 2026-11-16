@@ -65,7 +65,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   }),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => undefined) }));
-vi.mock("@tauri-apps/plugin-notification", () => ({ isPermissionGranted: async () => false, requestPermission: async () => "denied", sendNotification: () => undefined }));
 
 describe("spotify end of track", () => {
   beforeEach(() => {

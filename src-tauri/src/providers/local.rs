@@ -56,6 +56,7 @@ impl LocalMusicAdapter {
             configured: true,
             connected: true,
             needs_reconnect: false,
+            missing_scopes: Vec::new(),
             account_name: None,
             capabilities: Self::capabilities(),
             limitations: vec![

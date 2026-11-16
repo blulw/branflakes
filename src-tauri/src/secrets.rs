@@ -8,6 +8,9 @@ use crate::error::{AppError, AppResult};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+/// Service name of the release app (its bundle identifier). Credentials are
+/// stored under the running app's identifier, so a build with a different
+/// identifier (e.g. a test build) never reads or overwrites these.
 pub const SERVICE: &str = "com.unifiedmusic.desktop";
 
 pub const SPOTIFY_TOKENS: &str = "spotify.tokens";
@@ -26,18 +29,29 @@ pub trait SecretStore: Send + Sync {
     }
 }
 
-/// Windows Credential Manager (via `keyring`).
-pub struct KeyringStore;
+/// Windows Credential Manager (via `keyring`), scoped to one service name.
+pub struct KeyringStore {
+    service: String,
+}
 
 impl KeyringStore {
-    fn entry(key: &str) -> AppResult<keyring::Entry> {
-        keyring::Entry::new(SERVICE, key).map_err(AppError::from)
+    /// `service` should be the app identifier (`SERVICE` for the release app).
+    pub fn new(service: &str) -> Self {
+        KeyringStore { service: service.to_string() }
+    }
+
+    pub fn service(&self) -> &str {
+        &self.service
+    }
+
+    fn entry(&self, key: &str) -> AppResult<keyring::Entry> {
+        keyring::Entry::new(&self.service, key).map_err(AppError::from)
     }
 }
 
 impl SecretStore for KeyringStore {
     fn get(&self, key: &str) -> AppResult<Option<String>> {
-        match Self::entry(key)?.get_password() {
+        match self.entry(key)?.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.into()),
@@ -45,11 +59,11 @@ impl SecretStore for KeyringStore {
     }
 
     fn set(&self, key: &str, value: &str) -> AppResult<()> {
-        Self::entry(key)?.set_password(value).map_err(AppError::from)
+        self.entry(key)?.set_password(value).map_err(AppError::from)
     }
 
     fn delete(&self, key: &str) -> AppResult<()> {
-        match Self::entry(key)?.delete_credential() {
+        match self.entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(e.into()),
         }
@@ -112,5 +126,34 @@ mod tests {
     fn secret_debug_is_redacted() {
         let s = Secret::new("super-secret-token");
         assert_eq!(format!("{s:?}"), "Secret(<redacted>)");
+    }
+}
+
+#[cfg(test)]
+mod keyring_scope_tests {
+    use super::*;
+
+    #[test]
+    fn release_identifier_keeps_the_existing_service_name() {
+        // The installed app's credentials must stay where they are.
+        assert_eq!(KeyringStore::new(SERVICE).service(), "com.unifiedmusic.desktop");
+        assert_ne!(KeyringStore::new("com.unifiedmusic.desktop.acceptance").service(), SERVICE);
+    }
+
+    /// Real Credential Manager: a store with another service name can't see
+    /// or delete entries of the release service. Uses a throwaway key.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "writes a throwaway entry to Windows Credential Manager"]
+    fn separate_services_are_isolated_in_credential_manager() {
+        let key = "isolation-check.throwaway";
+        let a = KeyringStore::new("com.unifiedmusic.desktop.isolation-test-a");
+        let b = KeyringStore::new("com.unifiedmusic.desktop.isolation-test-b");
+        a.set(key, "A").unwrap();
+        assert_eq!(b.get(key).unwrap(), None);
+        b.delete(key).unwrap();
+        assert_eq!(a.get(key).unwrap().as_deref(), Some("A"));
+        a.delete(key).unwrap();
+        assert_eq!(a.get(key).unwrap(), None);
     }
 }

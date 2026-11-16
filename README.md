@@ -7,7 +7,7 @@ A Windows 11 desktop music app that puts **local files**, **Spotify** and **Soun
 
 - Tauri 2 · Rust backend · React + TypeScript + Vite · Tailwind CSS + shadcn/ui
 - SQLite with versioned migrations · Windows Credential Manager for secrets
-- Windows media keys / System Media Transport Controls · desktop notifications
+- Windows media keys / System Media Transport Controls · taskbar thumbnail playback buttons
 - NSIS and MSI installers
 
 It does **not** embed, automate, or talk over IPC to any other music application. Spotify playback goes through Spotify's documented Web API (Spotify Connect), and audio is never downloaded or extracted.
@@ -23,11 +23,13 @@ It does **not** embed, automate, or talk over IPC to any other music application
 |---|---|
 | Unified library | One track model with stable internal IDs plus provider IDs. Every row shows a Local / Spotify / SoundCloud badge. Search, sort, source and availability filters, plus artist and album browsing across sources. |
 | Playlists and queue | Playlists and the queue can mix sources. The queue, current track, position, volume, repeat mode and Spotify device are saved in SQLite and restored on restart. |
+| Spotify playlist sync | Imported Spotify playlists are **Spotify Synced** automatically (when Spotify allows it). New playlists are local-only unless you choose to create them on Spotify too. Synced playlists you own or collaborate on stay the same in both apps: tracks, order, name and cover stay the same in both apps (two-way, every 5 minutes and on demand). Adding a local or SoundCloud track to one makes a **Branflakes-only copy** instead. See [docs/PROVIDERS.md](docs/PROVIDERS.md#playlist-sync). |
 | Local files | Scan the folders you choose. Read metadata and embedded artwork. Write tags into the actual files, with a backup first, read-back verification and automatic restore on mismatch. Unrelated tags and frames are preserved. App-only overrides and custom artwork work for any source. |
 | Spotify | PKCE OAuth, import of saved tracks and owned playlists, search, and Spotify Connect playback control (Premium) with a device picker. There is also an experimental in-app Web Playback SDK device, used only when WebView2 exposes Widevine. |
 | SoundCloud | OAuth 2.1 + PKCE, import of likes and playlists, search, and in-app AAC HLS streaming with the required attribution. Optional *web mode* (off by default) works without an official API app; see the note below. |
 | Last.fm | Desktop auth, Now Playing and scrobbling for **local, Spotify and SoundCloud tracks** plus SoundCloud (Spotify can be turned off separately). The cache survives restarts and is retried in batches of 50. |
-| Playback | Each provider declares its capabilities, and the UI disables any control the active source can't perform, with a tooltip saying why. One source owns playback at a time. |
+| Find alternative | Unavailable Spotify tracks in a playlist get a **Find alternative** button. It searches your local files first, then SoundCloud, for the same song (title and artist), and adds your pick right after the original, which stays. |
+| Playback | Each provider declares its capabilities, and the UI disables any control the active source can't perform, with a tooltip saying why. One source owns playback at a time. Previous / Play-Pause / Next buttons appear in the Windows taskbar hover thumbnail. |
 
 ## Requirements
 
@@ -49,8 +51,8 @@ npm run tauri build      # release build + installers
 Build outputs:
 
 - `src-tauri/target/release/branflakes.exe`
-- `src-tauri/target/release/bundle/nsis/branflakes_0.1.0_x64-setup.exe` — per-user installer with an uninstaller (Apps & Features)
-- `src-tauri/target/release/bundle/msi/branflakes_0.1.0_x64_en-US.msi` — MSI package
+- `src-tauri/target/release/bundle/nsis/branflakes_0.2.1_x64-setup.exe` — per-user installer with an uninstaller (Apps & Features)
+- `src-tauri/target/release/bundle/msi/branflakes_0.2.1_x64_en-US.msi` — MSI package
 
 The installers are **not code-signed**. Windows SmartScreen will warn until you sign them with your own certificate (see the Tauri docs on Windows code signing).
 

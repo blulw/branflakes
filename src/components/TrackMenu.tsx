@@ -12,13 +12,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, toApiError } from "@/lib/api";
+import { addTracksToPlaylist } from "@/lib/playlistAdd";
+import { PlaylistKindIcon } from "@/components/PlaylistKind";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 import type { Track } from "@/lib/types";
 
 export function TrackMenu({ track, children, extra }: { track: Track; children: ReactNode; extra?: ReactNode }) {
   const enqueue = usePlayer((s) => s.enqueue);
-  const { playlists, refreshPlaylists, bumpLibrary, edit } = useUi();
+  const { playlists, refreshPlaylists, bumpLibrary, edit, navigate } = useUi();
 
   const run = (fn: () => Promise<unknown>, ok?: string) => async () => {
     try {
@@ -40,8 +42,14 @@ export function TrackMenu({ track, children, extra }: { track: Track; children: 
           <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
             {playlists.length === 0 && <DropdownMenuItem disabled>No playlists yet</DropdownMenuItem>}
             {playlists.map((p) => (
-              <DropdownMenuItem key={p.id} onSelect={run(() => api.addToPlaylist(p.id, [track.id]).then(refreshPlaylists), `Added to ${p.name}`)}>
-                {p.name}
+              <DropdownMenuItem
+                key={p.id}
+                onSelect={() =>
+                  void addTracksToPlaylist(p, [track], { onOpen: (copy) => navigate({ name: "playlist", id: copy.id }) }).then(() => refreshPlaylists())
+                }
+              >
+                <span className="truncate">{p.name}</span>
+                <PlaylistKindIcon playlist={p} className="ml-auto" />
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>

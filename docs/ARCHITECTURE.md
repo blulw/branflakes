@@ -29,6 +29,9 @@
 │ oauth.rs        PKCE, CSRF state, loopback redirect listener                  │
 │ secrets.rs      Windows Credential Manager (keyring) + test store             │
 │ media.rs        Windows SMTC / media keys (souvlaki) on a dedicated thread    │
+│ taskbar.rs      taskbar thumbnail toolbar (ITaskbarList3) on the UI thread    │
+│ sync/           Spotify playlist sync: merge.rs (pure 3-way merge, push plan) │
+│                 mod.rs (enable, sync pass, add/fork rule, scheduler state)    │
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -56,6 +59,33 @@
 
 **Errors and rate limits.** `http::send` rebuilds and retries requests. It honours `Retry-After` on 429 (capped). It returns Spotify's `QUOTA_EXCEEDED` immediately, because retrying can't help. 5xx and transport errors get exponential backoff. 401 triggers one token refresh and a retry. 403 `PREMIUM_REQUIRED` maps to `AppError::PremiumRequired`, which turns the Spotify controls off. All errors reach the UI as `{ kind, message }`.
 
+**Taskbar thumbnail toolbar** (`taskbar.rs`). Separate from SMTC. Uses `ITaskbarList3::ThumbBarAddButtons/UpdateButtons` and a window subclass (`SetWindowSubclass`) on the UI thread. A click (`WM_COMMAND` + `THBN_CLICKED`) is emitted as the same `media-control` event SMTC uses, so the frontend controller handles it exactly like a media key, filtered by the resolved controls. The frontend sends `canPrevious/canPlayPause/canNext` and the play state with every `media_update`, and pushes again whenever those flags change (a store subscription, no polling); the toolbar disables buttons accordingly. On Windows 11 the shell returns S_OK for every toolbar call, so duplicates are prevented by bookkeeping: buttons are added only on `TaskbarButtonCreated` (first show, Explorer restart), with a 3 s one-shot fallback for the case where that message arrived before the subclass was installed (observed in the real app). Icons are rendered at the small-icon size for the current DPI and re-rendered on theme/DPI change. On exit the subclass, timer, icons and COM object are released.
+
+**Spotify playlist sync** (`sync/`). `spotify_playlist_links` stores, per synced playlist, the *base*: the item URIs, name, cover identity and snapshot both sides agreed on after the last sync. A pass:
+1. Reads `GET /playlists/{id}` metadata (cheap). It skips the full item read when Spotify's `snapshot_id` and the local items are both unchanged.
+2. Otherwise reads every item. A read whose pages don't add up to `total` is an error, never treated as removals.
+3. Runs a three-way merge (`merge.rs`) on occurrence-tagged URIs: one-sided changes win, an item is kept if either side has it when both changed, and when both changed Spotify's order wins. Spotify-only items (local files, episodes, unavailable placeholders) are preserved and never pushed.
+4. Re-checks the snapshot. If it moved, the pass reruns.
+5. Plans the push with remove/move/add (LIS-minimal moves, ≤100 URIs per request; a full replace only when no unrepresentable item could be lost). It verifies the plan by simulation, sends it, then reads Spotify back and adopts what Spotify actually has.
+6. Name and cover are three-way too.
+7. Writes Branflakes inside a transaction that first checks that the playlist wasn't edited meanwhile; if it was, the pass reruns.
+
+Because every pass is idempotent against the base, interrupted passes (crash/restart) are simply repeated, and a pass after a successful one is a no-op, so there are no sync loops. The scheduler (`commands::sync_scheduler`) is a Tokio task: a full pass every interval (default 5 min, `spotify.sync_interval_secs`), a debounced pass 3 s after each local edit, and backoff on `Retry-After`/quota (1 h)/offline (60 s). Only one sync runs at a time, and a second request for the same playlist is refused. Interrupted syncs are marked pending on startup.
+
+**Playlist lifecycle** (`sync/`).
+- `import_playlist` links imports via `enable` (Spotify's contents become the base). `auto_link_imported` runs on each full scheduler pass for earlier imports, and `remove_duplicates_of` drops stale unsynced copies that hold only Spotify tracks.
+- `create_and_link` records a `spotify_pending_creates` row before `POST /me/playlists`. A definite refusal clears it; an unknown outcome keeps it, so a retry adopts the playlist Spotify did create (owned, same name, empty, unlinked) instead of duplicating it. The link starts with an empty base, so the next pass pushes the contents.
+- `delete_synced` sets `pending_delete`, removes the playlist from the Spotify library only if it is still there, verifies that, then deletes locally. `resume_delete` handles restarts.
+- Each pass checks existence and library membership. A definite "missing" is recorded (`missing_kind`, `missing_since`) and acted on only when a later check at least 60 s afterwards agrees; errors never count.
+- **POST requests are never retried after a 5xx or a mid-request failure** (`RetryPolicy::non_idempotent`), because Spotify may already have applied them. A later pass reconciles idempotently instead.
+
+**Alternatives** (`alternatives.rs`, `db/alternatives.rs`).
+- Matching is pure and unit-tested (normalised title + artist, tiered score).
+- A chosen alternative is a normal playlist item after its original, recorded in `playlist_alternatives`.
+- For a synced playlist, `read_local` leaves active alternatives out of the merge, and `alternatives::reinsert` puts them back beside their originals after each write-back (and in forks). Removing one marks it `removed`, so it is never re-added.
+
+**Playlist add rule** (`sync::add_tracks`). Every UI path (track menu, Add songs dialog, multi-track adds) calls `playlist_add_tracks`, which enforces the rule in the backend: if the playlist is Spotify Synced and any track isn't a Spotify track, the synced playlist is left untouched and `playlists::create_fork` makes a Branflakes-only copy (all items, the new tracks at the requested position, the same cover, `forked_from` set, no origin, no link).
+
 **Threads.** The SQLite connection is behind a `Mutex`. Long work (folder scans, tag writes) opens its own WAL connection on a blocking thread. SMTC objects live on a dedicated thread that receives updates over a channel. Button presses become `media-control` events, which the controller filters through the resolved controls.
 
 ## Database
@@ -68,8 +98,11 @@ Migrations are embedded (`src-tauri/migrations/*.sql`) and applied in order, tra
 | `track_overrides` | App-level metadata and artwork overrides. |
 | `tracks_effective` (view) | Tracks with overrides applied. |
 | `library_folders` | User-selected scan roots. |
-| `playlists`, `playlist_items` | Mixed-source playlists. `origin` links imported playlists. |
+| `playlists`, `playlist_items` | Mixed-source playlists. `origin` links imported playlists; `forked_from` marks Branflakes-only copies of synced playlists. |
 | `queue_items`, `playback_state` | Persisted queue and player state (a single row). |
 | `scrobble_queue` | Persistent Last.fm cache (pending/failed, attempts, last error). |
 | `metadata_backups` | Backup file per tag write. |
 | `settings` | Non-secret key/value settings. |
+| `spotify_pending_creates` | Spotify playlist creations whose outcome is unknown (retry adopts instead of duplicating; migration 0005). |
+| `playlist_alternatives` | Alternatives chosen for unavailable Spotify tracks, per playlist; `removed` once the user removes one (migration 0005). |
+| `spotify_playlist_links` | Spotify Synced playlists: Spotify id, permissions, snapshot, 3-way-merge base, status, last sync/error (migration 0004). No credentials. |

@@ -37,6 +37,10 @@ pub struct AppState {
     pub soundcloud_web: SoundCloudWebAdapter,
     pub lastfm: LastFmAdapter,
     pub media: Mutex<Option<MediaControlsHandle>>,
+    /// Taskbar thumbnail toolbar (Windows), separate from SMTC.
+    pub taskbar: Mutex<Option<crate::taskbar::TaskbarHandle>>,
+    /// Spotify playlist sync scheduler state.
+    pub sync: crate::sync::SyncEngine,
     /// Only one interactive sign-in may run at a time (shared loopback port).
     pub oauth_lock: tokio::sync::Mutex<()>,
 }
