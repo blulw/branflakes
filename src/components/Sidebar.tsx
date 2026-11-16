@@ -3,6 +3,9 @@ import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp }
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { usePlayer } from "@/playback/store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PlaylistCover } from "./PlaylistCover";
+import { PlaylistKindIcon } from "./PlaylistKind";
 import { api, toApiError } from "@/lib/api";
 import { PLAYLIST_SORT_LABEL, sortPlaylists, type PlaylistSort } from "@/lib/playlistSort";
 import { cn } from "@/lib/utils";
@@ -42,6 +46,9 @@ export function Sidebar() {
   const { view, navigate, playlists, refreshPlaylists } = useUi();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [withSpotify, setWithSpotify] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const spotifyConnected = usePlayer((s) => !!s.providers.spotify?.connected);
   const [sort, setSort] = useState<PlaylistSort>(loadSort);
   const sorted = useMemo(() => sortPlaylists(playlists, sort), [playlists, sort]);
 
@@ -59,14 +66,28 @@ export function Sidebar() {
   };
 
   const create = async () => {
+    if (busy || !name.trim()) return;
+    setBusy(true);
     try {
-      const p = await api.createPlaylist(name);
+      const sync = withSpotify && spotifyConnected;
+      const r = await api.createPlaylist(name, sync);
+      if (sync && r.spotifyError) {
+        toast.warning(`“${r.playlist.name}” was created in Branflakes only`, {
+          description: `Spotify sync couldn't be enabled: ${r.spotifyError}. You can try again from the playlist page.`,
+          duration: 12000,
+        });
+      } else if (sync) {
+        toast.success(`Created “${r.playlist.name}” and synced it with Spotify`);
+      }
       setName("");
+      setWithSpotify(false);
       setCreating(false);
       await refreshPlaylists();
-      navigate({ name: "playlist", id: p.id });
+      navigate({ name: "playlist", id: r.playlist.id });
     } catch (e) {
       toast.error(toApiError(e).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -120,7 +141,21 @@ export function Sidebar() {
             void create();
           }}
         >
-          <Input autoFocus placeholder="Playlist name" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setCreating(false)} className="h-8" />
+          <Input autoFocus placeholder="Playlist name" value={name} onChange={(e) => setName(e.target.value)} className="h-8" aria-label="Playlist name" />
+          <div className="mt-2 flex items-start gap-2 px-1">
+            <Switch id="new-pl-spotify" checked={withSpotify && spotifyConnected} disabled={!spotifyConnected} onCheckedChange={setWithSpotify} />
+            <Label htmlFor="new-pl-spotify" className="text-xs font-normal leading-snug text-muted-foreground">
+              {spotifyConnected ? "Also create it on Spotify (private) and keep it in sync" : "Connect Spotify in Settings to sync new playlists"}
+            </Label>
+          </div>
+          <div className="mt-2 flex justify-end gap-1">
+            <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => (setCreating(false), setName(""), setWithSpotify(false))}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" className="h-7" disabled={!name.trim() || busy}>
+              Create
+            </Button>
+          </div>
         </form>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -128,7 +163,10 @@ export function Sidebar() {
           <button key={p.id} className={cn(item(view.name === "playlist" && view.id === p.id), "py-1.5")} onClick={() => navigate({ name: "playlist", id: p.id })}>
             <PlaylistCover path={p.artworkPath} className="size-8 shrink-0" />
             <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate">{p.name}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="truncate">{p.name}</span>
+                <PlaylistKindIcon playlist={p} />
+              </span>
               <span className="block text-[11px] text-muted-foreground">{p.trackCount} tracks</span>
             </span>
           </button>

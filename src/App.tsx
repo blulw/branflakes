@@ -7,6 +7,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 import { toApiError } from "@/lib/api";
+import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
+import type { SyncEvent } from "@/lib/types";
 import { LibraryView } from "@/views/LibraryView";
 import { AlbumsView, ArtistsView } from "@/views/BrowseViews";
 import { PlaylistView } from "@/views/PlaylistView";
@@ -42,6 +45,26 @@ function CurrentView() {
 export default function App() {
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
+
+  // Spotify playlist sync runs in the backend; keep the UI current.
+  useEffect(() => {
+    const un = listen<SyncEvent>("playlist-sync", (e) => {
+      const ui = useUi.getState();
+      ui.setSyncing(e.payload.playlistId, e.payload.status === "syncing");
+      if (e.payload.status !== "syncing") {
+        void ui.refreshPlaylists().catch(() => undefined);
+        if (e.payload.changed) ui.bumpLibrary();
+      }
+      if (e.payload.status === "removed" || e.payload.status === "deleted") {
+        // Reported once, when it happens (the backend only emits it then).
+        if (e.payload.status === "removed" && e.payload.message) toast.warning("Spotify playlist removed", { description: e.payload.message, duration: 15000 });
+        if (ui.view.name === "playlist" && ui.view.id === e.payload.playlistId) ui.navigate({ name: "library" });
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     Promise.all([usePlayer.getState().init(), useUi.getState().refreshSettings()])

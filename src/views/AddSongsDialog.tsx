@@ -8,9 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, toApiError } from "@/lib/api";
+import { addTracksToPlaylist } from "@/lib/playlistAdd";
 import { formatDuration } from "@/lib/format";
 import { usePlayer } from "@/playback/store";
-import type { Track } from "@/lib/types";
+import type { Playlist, Track } from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -20,21 +21,27 @@ interface Props {
   /** Track IDs already in the playlist (shown as "In playlist"). */
   existing: Set<string>;
   onAdded(): void;
+  /** A non-Spotify track was added to a Spotify Synced playlist and went into a new Branflakes-only copy. */
+  onForked?(copy: Playlist): void;
+  /** Shown under the title (e.g. the Spotify Synced rule). */
+  note?: string;
 }
 
-export function AddSongsDialog({ open, onOpenChange, playlistId, playlistName, existing, onAdded }: Props) {
+export function AddSongsDialog({ open, onOpenChange, playlistId, playlistName, existing, onAdded, onForked, note }: Props) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (open) setAdded(new Set());
   }, [open]);
 
   const add = async (t: Track) => {
-    try {
-      await api.addToPlaylist(playlistId, [t.id]);
+    const r = await addTracksToPlaylist({ id: playlistId, name: playlistName }, [t], { quiet: true });
+    if (r.outcome?.kind === "Forked" && r.target) {
+      onForked?.(r.target);
+      return;
+    }
+    if (r.outcome) {
       setAdded((s) => new Set(s).add(t.id));
       onAdded();
-    } catch (e) {
-      toast.error(toApiError(e).message);
     }
   };
 
@@ -74,7 +81,7 @@ export function AddSongsDialog({ open, onOpenChange, playlistId, playlistName, e
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>Add songs to “{playlistName}”</DialogTitle>
-          <DialogDescription>Add from your library, or search Spotify and SoundCloud. Playlists can mix sources.</DialogDescription>
+          <DialogDescription>{note ?? "Add from your library, or search Spotify and SoundCloud. Playlists can mix sources."}</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="library" className="flex min-h-0 flex-1 flex-col">
           <TabsList>

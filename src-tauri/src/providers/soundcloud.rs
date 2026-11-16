@@ -129,6 +129,7 @@ impl SoundCloudAdapter {
             configured,
             connected,
             needs_reconnect: false,
+            missing_scopes: Vec::new(),
             account_name: account,
             capabilities: Self::capabilities(connected || web_mode),
             limitations: vec![

@@ -10,12 +10,15 @@ pub const LASTFM_API_KEY: &str = "lastfm.api_key";
 pub const LASTFM_ENABLED: &str = "lastfm.scrobbling_enabled";
 pub const LASTFM_SCROBBLE_SPOTIFY: &str = "lastfm.scrobble_spotify";
 pub const OAUTH_PORT: &str = "oauth.loopback_port";
-pub const NOTIFICATIONS_ENABLED: &str = "ui.notifications_enabled";
 pub const SPOTIFY_ACCOUNT: &str = "spotify.account_name";
 pub const SOUNDCLOUD_ACCOUNT: &str = "soundcloud.account_name";
 pub const LASTFM_ACCOUNT: &str = "lastfm.account_name";
 pub const SOUNDCLOUD_WEB_MODE: &str = "soundcloud.web_mode_enabled";
 pub const SPOTIFY_PREMIUM_DENIED: &str = "spotify.premium_denied";
+/// Spotify user id of the connected account (for playlist ownership checks).
+pub const SPOTIFY_USER_ID: &str = "spotify.user_id";
+/// Automatic playlist sync interval in seconds (default 300).
+pub const SPOTIFY_SYNC_INTERVAL: &str = "spotify.sync_interval_secs";
 
 pub fn get(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     Ok(conn

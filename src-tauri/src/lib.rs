@@ -11,6 +11,9 @@ pub mod providers;
 pub mod scrobbler;
 pub mod secrets;
 pub mod state;
+pub mod sync;
+pub mod taskbar;
+pub mod alternatives;
 
 use providers::{lastfm::LastFmAdapter, soundcloud::SoundCloudAdapter, spotify::SpotifyAdapter};
 use secrets::{KeyringStore, SecretStore};
@@ -27,7 +30,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
@@ -43,7 +45,14 @@ pub fn run() {
             }
 
             let http = http::client();
-            let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+            // Credentials are namespaced by the app identifier: the release
+            // app keeps using `com.unifiedmusic.desktop`; a test build with
+            // another identifier gets its own, separate credentials.
+            let identifier = app.config().identifier.clone();
+            if identifier != secrets::SERVICE {
+                log::warn!("non-release identifier {identifier}: using separate data, WebView profile and credentials");
+            }
+            let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore::new(&identifier));
             let state = AppState {
                 db: Mutex::new(conn),
                 spotify: SpotifyAdapter::new(http.clone(), secrets.clone()),
@@ -53,7 +62,9 @@ pub fn run() {
                 secrets,
                 paths,
                 media: Mutex::new(None),
+                taskbar: Mutex::new(None),
                 oauth_lock: tokio::sync::Mutex::new(()),
+                sync: sync::SyncEngine::default(),
             };
             app.manage(state);
 
@@ -69,7 +80,18 @@ pub fn run() {
                     log::warn!("system media controls are unavailable");
                 }
                 *app.state::<AppState>().media.lock().unwrap() = handle;
+
+                // Taskbar thumbnail toolbar (Previous / Play-Pause / Next).
+                // `setup` runs on the UI thread, which the toolbar requires.
+                let toolbar = taskbar::start(app.handle(), &window);
+                if toolbar.is_none() {
+                    log::warn!("taskbar thumbnail toolbar is unavailable");
+                }
+                *app.state::<AppState>().taskbar.lock().unwrap() = toolbar;
             }
+
+            // Spotify playlist sync runs in the backend, independent of the window.
+            tauri::async_runtime::spawn(commands::sync_scheduler(app.handle().clone()));
 
             // Periodically retry cached scrobbles.
             let handle = app.handle().clone();
@@ -137,6 +159,15 @@ pub fn run() {
             commands::spotify_control,
             commands::spotify_add_to_queue,
             commands::spotify_sdk_token,
+            commands::spotify_sync_candidates,
+            commands::spotify_sync_enable,
+            commands::spotify_sync_disable,
+            commands::spotify_sync_now,
+            commands::spotify_sync_all,
+            commands::playlist_link_spotify,
+            commands::alternatives_search,
+            commands::alternatives_add,
+            commands::alternatives_list,
             commands::soundcloud_connect,
             commands::soundcloud_disconnect,
             commands::soundcloud_import_library,
@@ -153,6 +184,17 @@ pub fn run() {
             commands::media_update,
             commands::app_info,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running branflakes");
+        .build(tauri::generate_context!())
+        .expect("error while building branflakes")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Runs on the UI thread: release the toolbar's subclass,
+                // icons and COM object.
+                taskbar::shutdown();
+                if let Some(st) = app.try_state::<AppState>() {
+                    st.sync.shutdown();
+                    *st.taskbar.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                }
+            }
+        });
 }

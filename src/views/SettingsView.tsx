@@ -5,6 +5,7 @@ import { Check, FolderPlus, Loader2, RefreshCw, Trash2, X, Info } from "lucide-r
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SpotifySyncSettings } from "./SpotifySyncSettings";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -94,7 +95,18 @@ function ImportSummary({ r }: { r: ImportReport }) {
   return (
     <p className="text-xs text-muted-foreground">
       Imported {r.tracks} tracks and {r.playlists} playlists.
+      {r.syncedPlaylists > 0 && ` ${r.syncedPlaylists} playlist${r.syncedPlaylists === 1 ? " is" : "s are"} now Spotify Synced.`}
       {r.skippedPlaylists.length > 0 && ` Skipped ${r.skippedPlaylists.length} playlists you don't own or collaborate on (not readable in Spotify Development Mode).`}
+      {r.notSynced.length > 0 && (
+        <span className="mt-1 block">
+          Imported without Spotify sync:
+          {r.notSynced.map((n) => (
+            <span key={n.name} className="block pl-2">
+              • {n.name}: {n.reason}
+            </span>
+          ))}
+        </span>
+      )}
       {r.errors.length > 0 && ` ${r.errors.length} errors: ${r.errors.slice(0, 3).join("; ")}`}
     </p>
   );
@@ -165,7 +177,7 @@ function Accounts() {
           <StatusLine p={providers.spotify} />
           {providers.spotify?.needsReconnect && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              Your Spotify sign-in is missing permissions the in-app player needs. Click <b>Reconnect Spotify</b> and approve the request in your browser.
+              Your Spotify sign-in is missing permissions the app now needs (in-app player, playlist sync). Click <b>Reconnect Spotify</b> and approve the request in your browser.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -197,6 +209,7 @@ function Accounts() {
           </div>
           {busy?.startsWith("spotify") && progress && <p className="text-xs text-muted-foreground">{progress}</p>}
           {imports.spotify && <ImportSummary r={imports.spotify} />}
+          {providers.spotify?.connected && <SpotifySyncSettings intervalMinutes={settings.spotifySyncIntervalMinutes} needsReconnect={!!providers.spotify.needsReconnect} />}
           <Limitations p={providers.spotify} />
         </CardContent>
       </Card>
@@ -553,14 +566,6 @@ function General() {
         <CardTitle>General</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <div className="flex items-center gap-2">
-          <Switch
-            id="notif"
-            checked={settings.notificationsEnabled}
-            onCheckedChange={(c) => void guard(() => api.updateSettings({ notificationsEnabled: c })).then(refreshSettings)}
-          />
-          <Label htmlFor="notif">Show a desktop notification on track change (when the window is in the background)</Label>
-        </div>
         <div className="flex items-end gap-2">
           <Field id="port" label="OAuth loopback port" className="w-32" placeholder={String(settings.oauthPort)} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} />
           <Button size="sm" variant="secondary" disabled={!port} onClick={() => void guard(() => api.updateSettings({ oauthPort: Number(port) }), "Saved — update the redirect URIs in your Spotify/SoundCloud apps").then(() => (setPort(""), refreshSettings()))}>

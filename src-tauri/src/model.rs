@@ -176,6 +176,9 @@ pub struct ProviderStatus {
     pub connected: bool,
     /// Connected, but the stored grant lacks permissions the app now needs.
     pub needs_reconnect: bool,
+    /// Which permissions are missing (lets the UI tell features apart, e.g.
+    /// the in-app player only needs some of them).
+    pub missing_scopes: Vec<String>,
     pub account_name: Option<String>,
     pub capabilities: PlaybackCapabilities,
     /// Human-readable restrictions shown in the UI.

@@ -55,15 +55,28 @@ export const api = {
 
   // playlists
   listPlaylists: () => call<T.Playlist[]>("playlist_list"),
-  createPlaylist: (name: string) => call<T.Playlist>("playlist_create", { name }),
+  /** Local-only unless `syncWithSpotify` (then a private Spotify playlist is created and linked). */
+  createPlaylist: (name: string, syncWithSpotify = false) => call<T.CreatePlaylistResult>("playlist_create", { name, syncWithSpotify }),
+  /** Explicitly create/link the Spotify counterpart of an existing playlist. */
+  linkPlaylistToSpotify: (id: string) => call<T.Playlist>("playlist_link_spotify", { id }),
   renamePlaylist: (id: string, name: string) => call<void>("playlist_rename", { id, name }),
-  deletePlaylist: (id: string) => call<void>("playlist_delete", { id }),
+  /** For Spotify Synced playlists pass `confirmSpotify` (also remove on Spotify) or `keepOnSpotify`. */
+  deletePlaylist: (id: string, opts: { confirmSpotify?: boolean; keepOnSpotify?: boolean } = {}) =>
+    call<string | null>("playlist_delete", { id, confirmSpotify: opts.confirmSpotify ?? null, keepOnSpotify: opts.keepOnSpotify ?? null }),
   playlistTracks: (id: string) => call<T.Track[]>("playlist_tracks", { id }),
   markPlaylistPlayed: (id: string) => call<void>("playlist_mark_played", { id }),
   setPlaylistArtwork: (id: string, imagePath: string | null) => call<T.Playlist>("playlist_set_artwork", { id, imagePath }),
-  addToPlaylist: (id: string, trackIds: string[]) => call<void>("playlist_add_tracks", { id, trackIds }),
+  /** Use `addTracksToPlaylist` (lib/playlistAdd) from UI code: it handles Spotify Synced copies. */
+  addToPlaylist: (id: string, trackIds: string[], position?: number) =>
+    call<T.AddOutcome>("playlist_add_tracks", { id, trackIds, position: position ?? null }),
   removeFromPlaylist: (id: string, position: number) => call<void>("playlist_remove_item", { id, position }),
   movePlaylistItem: (id: string, from: number, to: number) => call<void>("playlist_move_item", { id, from, to }),
+
+  // find alternative
+  alternativesSearch: (trackId: string, provider: "local" | "soundcloud") => call<T.AlternativesResult>("alternatives_search", { trackId, provider }),
+  alternativesAdd: (playlistId: string, originalTrackId: string, alternativeTrackId: string, position?: number) =>
+    call<T.AddAlternativeOutcome>("alternatives_add", { playlistId, originalTrackId, alternativeTrackId, position: position ?? null }),
+  alternativesList: (playlistId: string) => call<T.AlternativeRelation[]>("alternatives_list", { playlistId }),
 
   // queue
   getQueue: () => call<T.QueueSnapshot>("queue_get"),
@@ -97,6 +110,11 @@ export const api = {
     call<void>("spotify_control", { action, deviceId, value: value ?? null }),
   spotifyAddToQueue: (trackId: string, deviceId: string | null) => call<void>("spotify_add_to_queue", { trackId, deviceId }),
   spotifySdkToken: () => call<string>("spotify_sdk_token"),
+  spotifySyncCandidates: () => call<T.SpotifyPlaylistOption[]>("spotify_sync_candidates"),
+  spotifySyncEnable: (spotifyPlaylistId: string) => call<T.Playlist>("spotify_sync_enable", { spotifyPlaylistId }),
+  spotifySyncDisable: (playlistId: string) => call<void>("spotify_sync_disable", { playlistId }),
+  spotifySyncNow: (playlistId: string) => call<T.SyncReport>("spotify_sync_now", { playlistId }),
+  spotifySyncAll: () => call<T.SyncAllReport>("spotify_sync_all"),
 
   // soundcloud
   soundcloudConnect: () => call<void>("soundcloud_connect"),
@@ -117,5 +135,5 @@ export const api = {
 
   // system
   mediaUpdate: (update: T.MediaUpdate) => call<void>("media_update", { update }),
-  appInfo: () => call<{ version: string; dataDir: string; schemaVersion: number; mediaControls: boolean }>("app_info"),
+  appInfo: () => call<{ version: string; dataDir: string; schemaVersion: number; mediaControls: boolean; taskbarControls: boolean }>("app_info"),
 };

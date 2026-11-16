@@ -35,8 +35,10 @@ The live version of this table is in **Settings → Capabilities**. It is genera
 ### What the app uses
 
 - **Auth:** Authorization Code with PKCE (`accounts.spotify.com/authorize`, `/api/token`). No client secret is stored. Tokens are kept in Windows Credential Manager and refreshed automatically. If a refresh response omits `refresh_token`, the previous one is kept.
-- **Scopes:** `user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read playlist-read-private playlist-read-collaborative streaming user-read-email user-read-private`. The last three are what the Web Playback SDK checks; without them it fails with "Invalid token scopes". Older sign-ins without them are flagged in Settings with a **Reconnect Spotify** button (refreshing a token never adds scopes).
+- **Scopes:** `user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read playlist-read-private playlist-read-collaborative streaming user-read-email user-read-private playlist-modify-public playlist-modify-private ugc-image-upload`. The last three were added for playlist sync; sign-ins from before that are flagged **Reconnect Spotify**. The last three are what the Web Playback SDK checks; without them it fails with "Invalid token scopes". Older sign-ins without them are flagged in Settings with a **Reconnect Spotify** button (refreshing a token never adds scopes).
 - **Library:** `GET /me/tracks`, `GET /me/playlists`, `GET /playlists/{id}/items` (renamed from `/tracks`; reads `items[].item` and falls back to `.track`), `GET /search?type=track&limit=10`, `GET /me`.
+- **Playlist lifecycle:** `POST /me/playlists` (create, sent with `public: false`), `DELETE /me/library?uris=spotify:playlist:{id}` (remove from library), `GET /me/library/contains?uris=spotify:playlist:{id}` (still in your library?). The pre-2026 follow/unfollow and `/users/{id}/playlists` endpoints were removed by Spotify and are not used.
+- **Playlist sync:** `GET /playlists/{id}` (`fields=id,name,snapshot_id,collaborative,owner(id),images`), `GET /playlists/{id}/items`, `POST /playlists/{id}/items` (`uris`, `position`), `DELETE /playlists/{id}/items` (`items[{uri}]`, `snapshot_id`), `PUT /playlists/{id}/items` (reorder `range_start`/`insert_before`/`range_length`, or replace `uris`), `PUT /playlists/{id}` (`name`), `PUT /playlists/{id}/images` (base64 JPEG). Cover images are downloaded from the URL in the playlist's `images`. The deprecated/removed `/tracks` variants are not used.
 - **Playback:** `GET /me/player`, `GET /me/player/devices`, `PUT /me/player/play` (`uris`, `position_ms`), `PUT /me/player/pause`, `PUT /me/player/seek`, `PUT /me/player/volume`, `PUT /me/player` (transfer), `POST /me/player/queue`.
 
 ### Setup
@@ -71,9 +73,81 @@ The live version of this table is in **Settings → Capabilities**. It is genera
   - The app probes `requestMediaKeySystemAccess("com.widevine.alpha")` in WebView2 and loads the SDK only if that succeeds. Otherwise it reports the reason.
   - **Expect this to be unavailable** on standard WebView2 runtimes.
   - The SDK API requires giving the page an access token. This is the only place a token enters the webview.
+- **Playlist sync** (see below).
 - **Scrobbling:** Spotify plays that go through this app are scrobbled to Last.fm using the first credited artist. Turn this off under Settings → Last.fm → *Scrobble Spotify tracks* if your Spotify account is already linked to Last.fm in Spotify's own settings, or every play will be scrobbled twice.
 - **Not supported:** downloading or caching audio, gapless or crossfade.
 - **Playback position** comes from polling `GET /me/player` and is approximate. End of track is inferred from progress, so with Spotify *Autoplay* on, a track may briefly hand over to Spotify's autoplay before the app moves to the next queue item.
+
+### Playlist sync
+
+**Which playlists are synced.**
+- **Imported** Spotify playlists become Spotify Synced automatically, both during *Import* and, for earlier imports, in the background.
+  - Re-importing never duplicates a playlist.
+  - Old unsynced copies of the same Spotify playlist are removed when its synced copy is set up, but only if they hold nothing but Spotify tracks. Copies with your own local or SoundCloud additions, and Branflakes-only copies, are kept.
+  - Playlists that can't be synced (someone else's, missing permissions, or local/SoundCloud tracks in the Branflakes copy) are imported as ordinary playlists, and the import summary says why.
+- **New playlists** are local-only. Turning on *Also create it on Spotify* when creating one creates a **private** playlist in your Spotify account and syncs it.
+  - Local-only playlists, including Branflakes-only copies, can be linked later with **Sync with Spotify…**, after a confirmation.
+  - If creation fails, the Branflakes playlist stays. A retry never makes a second Spotify playlist: an earlier attempt whose answer was lost is adopted.
+
+**Deleting.** Spotify has **no API to permanently delete a playlist**. "Delete" in Spotify's own apps removes the playlist from your library, and so does Branflakes (`DELETE /me/library`).
+- Deleting a synced playlist opens a confirmation explaining exactly that.
+  - For **your own** playlist, it is deleted from your Spotify account (and can be restored from your Spotify account page).
+  - For **someone else's** playlist, Branflakes only unfollows it; the owner's playlist is not changed.
+  - You can also choose *Keep on Spotify, delete here only*.
+- The Branflakes copy is removed only after Spotify confirms the playlist is gone from your library. A failure changes nothing.
+- An interrupted deletion is finished or undone after a restart.
+- Deleting a local-only playlist or a Branflakes-only copy never touches Spotify.
+
+**Removed outside Branflakes.** Each sync checks that the playlist still exists (`GET /playlists/{id}`) and is still in your library (`GET /me/library/contains`).
+- A `404` ("no longer exists"), or a playlist missing from your library (Spotify's delete, or an unfollow), removes the Branflakes copy only when a **second, separate check** at least a minute later says the same.
+- The message distinguishes the two cases.
+- Network errors, timeouts, rate limits, expired sign-ins, permission errors and 5xx answers never count as a removal. The playlist and its link are kept, and the error is shown.
+
+Turn it on from a Spotify playlist's page (**Sync with Spotify**) or under Settings → Accounts → Spotify → *Choose playlists to sync…*. Synced playlists show a small Spotify mark in the sidebar, the playlist header and the *Add to playlist* menu. The playlist page has a **Sync Spotify Playlist** button next to the sort control, plus the last-synced time and any error.
+
+What syncs, in both directions: added and removed tracks, track order, the playlist name, and the cover. It runs automatically every 5 minutes while the app is running (Settings → Accounts → Spotify), a few seconds after each edit in Branflakes, and on demand.
+
+Spotify API limits that shape the behaviour:
+- **Ownership.**
+  - Only playlists you **own or collaborate on** can be synced. Spotify returns items only for those playlists (`403` otherwise), and only the owner may change details.
+  - **Collaborative** playlists owned by someone else sync tracks only. Renaming and cover changes are blocked in Branflakes, with an explanation.
+  - If you lose access later, the sync reports an error and changes nothing.
+- **No cover removal.** The API can set a custom cover but not remove one. Removing the cover in Branflakes is local only, and Spotify keeps its cover.
+- **Cover format.** Uploads must be base64 JPEG ≤ 256 KB. Branflakes re-encodes (≤ 640 px, lowering the quality as needed). If Spotify rejects the image, the Branflakes cover is kept, the failure is shown, and the same image is retried only on a manual sync.
+- **Cover storage.** Spotify image URLs expire within a day, and Spotify asks apps not to store images unless necessary. The playlist cover is cached locally because Branflakes displays it as the playlist's artwork.
+- **Detecting cover changes.** The API has no cover version, ETag or hash, and the docs don't say whether uploading a cover changes `snapshot_id`.
+  - *Automatic sync:* compares the cover's identity, which is the URL path without host, size or query. Spotify image ids live in the path and have been observed to change with the image, but this isn't documented. Nothing is downloaded unless the identity changes.
+  - *Manual sync* (Sync Spotify Playlist): also downloads the current cover and compares it by content hash. This catches a cover replaced behind an unchanged URL.
+  - So such a change is picked up on the next manual sync, not automatically.
+- **Removal is by URI.** `DELETE …/items` removes every occurrence of a URI. When only one of several duplicates should go, Branflakes removes the URI and re-adds the remaining copies at their positions.
+- **Snapshots don't lock.** `snapshot_id` is not an optimistic lock; Spotify applies changes even if the playlist changed. Branflakes therefore re-reads the snapshot right before writing and starts over if it moved, then reads the result back.
+- **Branflakes can't hold these items.** Spotify local files, podcast episodes and unavailable entries can't be represented, so Branflakes never edits them. They keep their place on Spotify, and a full replace is never used while they're present.
+- **Rate limits and errors.**
+  - Rate limits honour `Retry-After`. A `QUOTA_EXCEEDED` response pauses automatic sync for an hour.
+  - Expired or revoked sign-ins show **Reconnect Spotify**. Offline periods retry every minute until the connection returns.
+
+### Find alternative
+
+An unavailable Spotify track is one Spotify itself reports as not playable (`is_playable: false` / `restrictions`) in a successful response. Temporary errors never mark a track unavailable.
+- **Searching.** In a playlist, such a track has a **Find alternative** button.
+  - It searches your **local library** first, then **SoundCloud**: the official API if connected, otherwise web mode if enabled. SoundCloud is searched even when there are local matches.
+  - Results must match both the **title and the artist**. Case, punctuation, spacing, "feat." credits and "(Official Video)"-style noise are ignored. Exact matches rank first, and duplicate results are removed.
+- **Adding.** Your pick is added **right after** the original. The original Spotify track is never removed or replaced.
+- **In a Spotify Synced playlist**, the alternative exists only in Branflakes (Spotify can't hold local or SoundCloud tracks):
+  - the sync engine keeps it next to its original and never sends it to Spotify;
+  - Spotify-only entries that were never imported (shown by Spotify as empty items) have no title, so they can't be searched.
+- **Remembered choices.** The choice is remembered across restarts. A removed alternative is never added back automatically, and choosing it again explicitly works.
+
+Adding a **local or SoundCloud track** to a synced playlist never touches Spotify. Branflakes makes a new Branflakes-only playlist, “Name (Branflakes)”, with the playlist's tracks plus the new track. The copy shows a fork mark ("Branflakes-only copy of …"), is never synced, and can be edited independently.
+- **Which version is copied.** Before copying, Branflakes reads Spotify's current playlist and merges it with any Branflakes edits that haven't synced yet, exactly as the next sync would. This is read-only: nothing is written to Spotify, the synced playlist or its sync state.
+- **If Spotify can't be checked** (not connected, offline, sign-in problem, or no answer within 20 s), the copy uses the playlist as Branflakes last synced it. The toast (a warning) and the copy's page both say so.
+- **Position.** The new track goes right after the track you inserted it after, even if Spotify added tracks before it.
+- **Entries that are never copied**, because Branflakes can't hold them:
+  - Spotify **local files** (`spotify:local:…`);
+  - **podcast episodes**;
+  - **unavailable entries**, for which Spotify returns no item.
+
+  When any are left out, the toast is a warning and the copy's page shows a note such as “Not copied: 2 (1 podcast episode, 1 Spotify local file): …. Branflakes can't hold these, so this copy is not complete.”
 
 ---
 
