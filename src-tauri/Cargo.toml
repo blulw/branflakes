@@ -1,6 +1,6 @@
 [package]
 name = "branflakes"
-version = "0.2.1"
+version = "0.3.0"
 description = "branflakes"
 authors = ["branflakes"]
 edition = "2024"
@@ -43,8 +43,10 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "f
 regex = "1.13.1"
 # Re-encoding playlist covers as JPEG for Spotify's upload endpoint.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+symphonia = { version = "0.5", features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "vorbis", "wav", "pcm", "mkv"] }
 
 [target.'cfg(windows)'.dependencies]
+wasapi = "0.27"
 # Taskbar thumbnail toolbar (ITaskbarList3). Same version Tauri already uses.
 windows = { version = "0.62", features = [
     "Win32_Foundation",

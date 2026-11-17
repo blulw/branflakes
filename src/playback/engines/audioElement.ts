@@ -6,12 +6,21 @@ import { convertFileSrc } from "@/lib/tauri";
 import { api } from "@/lib/api";
 import type { Source, Track } from "@/lib/types";
 import type { EngineCallbacks, PlaybackEngine } from "./types";
+import { LOUDNESS_WAIT_MS, UNKNOWN_GAIN, effectiveVolume, normalizationGain } from "../normalize";
+
+const RAMP_MS = 500;
 
 export class AudioElementEngine implements PlaybackEngine {
   readonly sources: readonly Source[] = ["local", "soundcloud"];
   private audio: HTMLAudioElement;
   private hls: Hls | null = null;
   private loadToken = 0;
+  private userVolume = 1;
+  private normalize = true;
+  /** Per-track normalization gain currently applied (ramped). */
+  private gain = 1;
+  private current: Track | null = null;
+  private ramp: number | null = null;
 
   constructor(private cb: EngineCallbacks) {
     this.audio = new Audio();
@@ -40,6 +49,8 @@ export class AudioElementEngine implements PlaybackEngine {
   }
 
   private resetSource() {
+    if (this.ramp != null) cancelAnimationFrame(this.ramp);
+    this.ramp = null;
     this.hls?.destroy();
     this.hls = null;
     this.audio.pause();
@@ -47,9 +58,63 @@ export class AudioElementEngine implements PlaybackEngine {
     this.audio.load();
   }
 
+  private applyVolume() {
+    this.audio.volume = effectiveVolume(this.userVolume, this.normalize ? this.gain : 1);
+  }
+
+  /** Move the track gain to `g`, smoothly unless `instant`. */
+  private setGain(g: number, instant: boolean) {
+    if (this.ramp != null) cancelAnimationFrame(this.ramp);
+    this.ramp = null;
+    if (instant || typeof requestAnimationFrame !== "function") {
+      this.gain = g;
+      this.applyVolume();
+      return;
+    }
+    const from = this.gain;
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / RAMP_MS);
+      this.gain = from + (g - from) * t;
+      this.applyVolume();
+      this.ramp = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    this.ramp = requestAnimationFrame(step);
+  }
+
+  /** Turn loudness normalization on/off (affects the current track immediately). */
+  setNormalize(on: boolean) {
+    if (on === this.normalize) return;
+    this.normalize = on;
+    if (on && this.current) {
+      // Mid-track: keep the current level until the measured gain arrives, then glide.
+      this.setGain(1, true);
+      void this.startLoudness(this.current, this.loadToken, false);
+    } else {
+      this.applyVolume();
+    }
+  }
+
+  /** Look up the track's loudness; resolves once the gain is known (or the wait times out). */
+  private startLoudness(track: Track, token: number, fresh = true): Promise<void> {
+    if (fresh) this.setGain(UNKNOWN_GAIN, true);
+    const lookup = api
+      .trackLoudness(track.id)
+      .then((lufs) => {
+        if (token === this.loadToken) this.setGain(normalizationGain(lufs), false);
+      })
+      .catch(() => {
+        if (token === this.loadToken) this.setGain(1, false);
+      });
+    return Promise.race([lookup, new Promise<void>((r) => setTimeout(r, LOUDNESS_WAIT_MS))]);
+  }
+
   async load(track: Track, startMs: number, autoplay: boolean): Promise<void> {
     const token = ++this.loadToken;
     this.resetSource();
+    this.current = track;
+    // Gain known before the first sample when cached; otherwise ramps in once analysed.
+    const loudness = this.normalize ? this.startLoudness(track, token) : (this.setGain(1, true), Promise.resolve());
     if (track.source === "local") {
       if (!track.filePath) throw new Error("Local track has no file path");
       this.audio.src = convertFileSrc(track.filePath);
@@ -77,6 +142,9 @@ export class AudioElementEngine implements PlaybackEngine {
       };
       this.audio.addEventListener("loadedmetadata", seekTo, { once: true });
     }
+    await loudness;
+    if (token !== this.loadToken) return;
+    if (this.ramp == null) this.applyVolume();
     if (autoplay) await this.play();
   }
 
@@ -96,10 +164,12 @@ export class AudioElementEngine implements PlaybackEngine {
     this.audio.currentTime = Math.max(0, ms / 1000);
   }
   async setVolume(v: number) {
-    this.audio.volume = Math.min(1, Math.max(0, v));
+    this.userVolume = Math.min(1, Math.max(0, v));
+    this.applyVolume();
   }
   async release() {
     this.loadToken++;
+    this.current = null;
     this.resetSource();
   }
 }

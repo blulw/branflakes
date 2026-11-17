@@ -271,6 +271,8 @@ export interface AppSettings {
   lastfmScrobbleSpotify: boolean;
   oauthPort: number;
   spotifySyncIntervalMinutes: number;
+  /** Scale in-app playback towards a common loudness. */
+  normalizeVolume: boolean;
   spotifyRedirectUri: string;
   soundcloudRedirectUri: string;
   dataDir: string;
@@ -287,6 +289,7 @@ export interface SettingsPatch {
   lastfmScrobbleSpotify?: boolean;
   oauthPort?: number;
   spotifySyncIntervalMinutes?: number;
+  normalizeVolume?: boolean;
 }
 
 export interface ImportReport {

@@ -555,6 +555,23 @@ function CapabilityMatrix() {
   );
 }
 
+function NormalizeVolume() {
+  const { normalizeVolume, setNormalizeVolume } = usePlayer();
+  return (
+    <div className="flex items-start gap-3">
+      <Switch id="normalize-volume" checked={normalizeVolume} onCheckedChange={(c) => void setNormalizeVolume(c)} />
+      <div className="space-y-1">
+        <Label htmlFor="normalize-volume">Consistent volume between songs</Label>
+        <p className="text-xs text-muted-foreground">
+          Measures each song's average loudness (LUFS) the first time it plays and adjusts its level so loud and quiet songs sound about the same. The volume
+          slider still controls overall volume. Spotify songs use the same song from your local files when you have it (on any device); otherwise the
+          in-app player measures the song while it plays, adjusting a few seconds in and remembering the result once most of the song has played.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function General() {
   const { settings, refreshSettings } = useUi();
   const { data: info } = useAsync(() => api.appInfo(), []);
@@ -566,6 +583,7 @@ function General() {
         <CardTitle>General</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        <NormalizeVolume />
         <div className="flex items-end gap-2">
           <Field id="port" label="OAuth loopback port" className="w-32" placeholder={String(settings.oauthPort)} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} />
           <Button size="sm" variant="secondary" disabled={!port} onClick={() => void guard(() => api.updateSettings({ oauthPort: Number(port) }), "Saved — update the redirect URIs in your Spotify/SoundCloud apps").then(() => (setPort(""), refreshSettings()))}>

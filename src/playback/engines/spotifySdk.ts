@@ -12,6 +12,7 @@ interface SpotifyPlayer {
   connect(): Promise<boolean>;
   disconnect(): void;
   activateElement?(): Promise<void>;
+  setVolume(volume: number): Promise<void>;
   addListener(event: string, cb: (payload: any) => void): void;
 }
 
@@ -154,6 +155,11 @@ export function startSdkDevice(): Promise<SdkResult> {
  */
 export function activateSdkElement() {
   void player?.activateElement?.().catch(() => undefined);
+}
+
+/** Set the in-app player's volume locally (no Web API call). */
+export async function sdkSetVolume(v: number): Promise<void> {
+  await player?.setVolume(Math.min(1, Math.max(0, v)));
 }
 
 export function stopSdkDevice() {

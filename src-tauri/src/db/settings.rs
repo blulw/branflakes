@@ -19,6 +19,8 @@ pub const SPOTIFY_PREMIUM_DENIED: &str = "spotify.premium_denied";
 pub const SPOTIFY_USER_ID: &str = "spotify.user_id";
 /// Automatic playlist sync interval in seconds (default 300).
 pub const SPOTIFY_SYNC_INTERVAL: &str = "spotify.sync_interval_secs";
+/// Normalize in-app playback loudness across tracks (default on).
+pub const NORMALIZE_VOLUME: &str = "playback.normalize_volume";
 
 pub fn get(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     Ok(conn

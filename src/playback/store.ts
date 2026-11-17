@@ -37,6 +37,8 @@ export interface PlayerState {
   repeatMode: RepeatMode;
   shuffle: boolean;
   volume: number;
+  /** Loudness normalization for in-app (local/SoundCloud) playback. */
+  normalizeVolume: boolean;
   status: PlayerStatus;
   positionMs: number;
   durationMs: number | null;
@@ -62,6 +64,7 @@ export interface PlayerState {
   previous(): Promise<void>;
   seek(ms: number): Promise<void>;
   setVolume(v: number): Promise<void>;
+  setNormalizeVolume(on: boolean): Promise<void>;
   cycleRepeat(): void;
   shuffleUpcoming(): Promise<void>;
   refreshSpotifyDevices(): Promise<void>;
@@ -159,9 +162,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
   const spotifyEngine = new SpotifyConnectEngine(callbacks, {
     getDeviceId: () => get().spotifyDeviceId,
     onState: (state) => set({ spotifyState: state }),
+    getVolume: () => get().volume,
+    isInApp: () => isInAppSpotify(),
   });
 
+  /** Spotify is playing on this app's own Web Playback SDK device. */
+  function isInAppSpotify(): boolean {
+    const s = get();
+    if (!s.sdkDeviceId) return false;
+    if (s.spotifyDeviceId) return s.spotifyDeviceId === s.sdkDeviceId;
+    return s.spotifyState?.device?.id === s.sdkDeviceId;
+  }
+
   const engineFor = (source: Source): PlaybackEngine => (source === "spotify" ? spotifyEngine : audioEngine);
+
+  /** Analyse the current and next in-app tracks ahead of time so their gain is ready on load. */
+  function prefetchLoudness() {
+    const s = get();
+    if (!s.normalizeVolume || s.currentIndex == null) return;
+    for (const t of [s.queue[s.currentIndex], s.queue[s.currentIndex + 1]]) {
+      if (t && t.availability !== "unavailable") void api.trackLoudness(t.id).catch(() => undefined);
+    }
+  }
 
   async function persist() {
     const s = get();
@@ -256,6 +278,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     try {
       if (engine === audioEngine) await engine.setVolume(s.volume);
       await engine.load(track, startMs, autoplay);
+      prefetchLoudness();
       if (autoplay) {
         scrobble = { trackId: track.id, source: track.source, startedAt: Math.floor(Date.now() / 1000), playedMs: 0, lastPos: startMs };
         void api.lastfmNowPlaying(track.id).catch(() => undefined);
@@ -275,6 +298,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     repeatMode: "off",
     shuffle: false,
     volume: 0.8,
+    normalizeVolume: true,
     status: "idle",
     positionMs: 0,
     durationMs: null,
@@ -287,6 +311,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
     sdkDeviceId: null,
 
     async init() {
+      try {
+        const settings = await api.getSettings();
+        audioEngine.setNormalize(settings.normalizeVolume);
+        spotifyEngine.setNormalize(settings.normalizeVolume);
+        set({ normalizeVolume: settings.normalizeVolume });
+      } catch {
+        // keep the default
+      }
       await get().refreshProviders();
       onSdkDeviceLost((reason) => {
         const s = get();
@@ -475,7 +507,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             toast.error(toApiError(e).message);
           }
         };
-        if (engine === spotifyEngine) {
+        if (engine === spotifyEngine && !isInAppSpotify()) {
           // Each Spotify volume change is a Web API call: debounce slider drags.
           if (volumeTimer != null) window.clearTimeout(volumeTimer);
           volumeTimer = window.setTimeout(() => void apply(), 350);
@@ -484,6 +516,18 @@ export const usePlayer = create<PlayerState>((set, get) => {
         }
       }
       void persist();
+    },
+
+    async setNormalizeVolume(on) {
+      audioEngine.setNormalize(on);
+      spotifyEngine.setNormalize(on);
+      set({ normalizeVolume: on });
+      if (on) prefetchLoudness();
+      try {
+        await api.updateSettings({ normalizeVolume: on });
+      } catch (e) {
+        toast.error(toApiError(e).message);
+      }
     },
 
     cycleRepeat() {
