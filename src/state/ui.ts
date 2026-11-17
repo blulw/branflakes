@@ -22,12 +22,25 @@ interface UiState {
   editing: Track | null;
   /** Playlists with a Spotify sync running right now (from backend events). */
   syncing: Record<string, boolean>;
+  /** Lyrics panel beside the main view. */
+  lyricsOpen: boolean;
+  toggleLyrics(): void;
   setSyncing(id: string, on: boolean): void;
   navigate(v: View): void;
   bumpLibrary(): void;
   refreshPlaylists(): Promise<void>;
   refreshSettings(): Promise<void>;
   edit(t: Track | null): void;
+}
+
+const LYRICS_KEY = "unified-music.lyrics-open";
+
+function loadLyricsOpen(): boolean {
+  try {
+    return localStorage.getItem(LYRICS_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -37,6 +50,17 @@ export const useUi = create<UiState>((set) => ({
   settings: null,
   editing: null,
   syncing: {},
+  lyricsOpen: loadLyricsOpen(),
+  toggleLyrics: () =>
+    set((s) => {
+      const lyricsOpen = !s.lyricsOpen;
+      try {
+        localStorage.setItem(LYRICS_KEY, lyricsOpen ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return { lyricsOpen };
+    }),
   setSyncing: (id, on) => set((s) => ({ syncing: { ...s.syncing, [id]: on } })),
   navigate: (view) => set({ view }),
   bumpLibrary: () => set((s) => ({ libraryVersion: s.libraryVersion + 1 })),

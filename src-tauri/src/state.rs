@@ -36,6 +36,8 @@ pub struct AppState {
     /// Unofficial, opt-in (Settings). See providers/soundcloud_web.rs.
     pub soundcloud_web: SoundCloudWebAdapter,
     pub lastfm: LastFmAdapter,
+    /// Genius text + LRCLIB time-synced lyrics.
+    pub lyrics: crate::lyrics::LyricsClient,
     pub media: Mutex<Option<MediaControlsHandle>>,
     /// Taskbar thumbnail toolbar (Windows), separate from SMTC.
     pub taskbar: Mutex<Option<crate::taskbar::TaskbarHandle>>,

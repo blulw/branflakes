@@ -1275,6 +1275,27 @@ pub async fn track_loudness(state: S<'_>, track_id: String) -> AppResult<Option<
 
 const SPOTIFY_CAPTURE_KEY: &str = "spotify:capture";
 
+// ================================================================ lyrics
+
+/// Lyrics for a track (Genius text, LRCLIB time-synced lines), cached per
+/// track. `refresh` skips the cache. `None` = nothing found.
+#[tauri::command]
+pub async fn lyrics_get(state: S<'_>, track_id: String, refresh: Option<bool>) -> AppResult<Option<crate::lyrics::Lyrics>> {
+    let t = library::get_track(&state.conn(), &track_id)?;
+    let key = crate::lyrics::lookup_key(&t);
+    if !refresh.unwrap_or(false) {
+        let hit = crate::lyrics::cached(&state.conn(), &t.id, &key)?;
+        if let Some(hit) = hit {
+            return Ok(hit);
+        }
+    }
+    let fetched = state.lyrics.fetch(&t).await?;
+    if fetched.complete {
+        crate::lyrics::store(&state.conn(), &t.id, &key, fetched.lyrics.as_ref())?;
+    }
+    Ok(fetched.lyrics)
+}
+
 /// The same recording in the local library, if there is one: exact title and
 /// primary artist, and (when both are known) a length within 3 seconds so a
 /// live version or remix isn't mistaken for it.

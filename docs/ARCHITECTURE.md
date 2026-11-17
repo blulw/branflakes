@@ -86,6 +86,8 @@ Because every pass is idempotent against the base, interrupted passes (crash/res
 
 **Playlist add rule** (`sync::add_tracks`). Every UI path (track menu, Add songs dialog, multi-track adds) calls `playlist_add_tracks`, which enforces the rule in the backend: if the playlist is Spotify Synced and any track isn't a Spotify track, the synced playlist is left untouched and `playlists::create_fork` makes a Branflakes-only copy (all items, the new tracks at the requested position, the same cover, `forked_from` set, no origin, no link).
 
+**Lyrics** (`lyrics.rs`, `components/LyricsPanel.tsx`). `lyrics_get` looks the track up on Genius and LRCLIB in parallel. Genius's song search works without a key; the text is extracted from the song page's `data-lyrics-container` blocks (skipping `data-exclude-from-selection` parts such as the contributor header and ads). LRCLIB supplies LRC lines, which are trusted only for a recording within 5 s of the track's length. Both must pass `alternatives::score` (title and artist), so covers and similar titles are rejected. Results, including "nothing found" (retried after 3 days), are cached in `lyrics_cache`, keyed by title/artist/length so a metadata edit refetches. A lookup where a source failed is not cached. The panel highlights the line at `positionMs + 250 ms` and stops auto-scrolling for 4 s after the user scrolls.
+
 **Threads.** The SQLite connection is behind a `Mutex`. Long work (folder scans, tag writes) opens its own WAL connection on a blocking thread. SMTC objects live on a dedicated thread that receives updates over a channel. Button presses become `media-control` events, which the controller filters through the resolved controls.
 
 ## Database

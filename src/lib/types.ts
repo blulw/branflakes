@@ -30,6 +30,21 @@ export interface Track {
   addedAt: string;
 }
 
+export interface LyricLine {
+  timeMs: number;
+  /** Empty = an instrumental gap. */
+  text: string;
+}
+
+/** Lyrics for a track: Genius text and/or LRCLIB time-synced lines. */
+export interface Lyrics {
+  synced: LyricLine[] | null;
+  plain: string | null;
+  plainSource: "genius" | "lrclib" | null;
+  geniusUrl: string | null;
+  instrumental: boolean;
+}
+
 export interface PlaybackCapabilities {
   play: boolean;
   pause: boolean;

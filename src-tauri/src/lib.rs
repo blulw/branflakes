@@ -16,6 +16,7 @@ pub mod taskbar;
 pub mod alternatives;
 pub mod loudness;
 pub mod loudness_capture;
+pub mod lyrics;
 
 use providers::{lastfm::LastFmAdapter, soundcloud::SoundCloudAdapter, spotify::SpotifyAdapter};
 use secrets::{KeyringStore, SecretStore};
@@ -60,6 +61,7 @@ pub fn run() {
                 spotify: SpotifyAdapter::new(http.clone(), secrets.clone()),
                 soundcloud: SoundCloudAdapter::new(http.clone(), secrets.clone()),
                 soundcloud_web: providers::soundcloud_web::SoundCloudWebAdapter::new(),
+                lyrics: lyrics::LyricsClient::new(http.clone()),
                 lastfm: LastFmAdapter::new(http),
                 secrets,
                 paths,
@@ -179,6 +181,7 @@ pub fn run() {
             commands::loudness_capture_gain,
             commands::loudness_capture_status,
             commands::loudness_capture_stop,
+            commands::lyrics_get,
             commands::soundcloud_web_import,
             commands::search_providers,
             commands::lastfm_connect,
