@@ -95,6 +95,8 @@ export const api = {
   providersStatus: () => call<T.ProviderStatus[]>("providers_status"),
   getSettings: () => call<T.AppSettings>("settings_get"),
   updateSettings: (patch: T.SettingsPatch) => call<T.AppSettings>("settings_update", { patch }),
+  /** Integrated loudness (LUFS) of a local/SoundCloud track, analysed once and cached. */
+  trackLoudness: (trackId: string) => call<number | null>("track_loudness", { trackId }),
   searchProviders: (query: string, spotifyOffset?: number) =>
     call<T.ProviderSearchResults>("search_providers", { query, spotifyOffset: spotifyOffset ?? null }),
 

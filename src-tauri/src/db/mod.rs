@@ -20,6 +20,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (3, include_str!("../../migrations/0003_primary_artist.sql")),
     (4, include_str!("../../migrations/0004_spotify_playlist_sync.sql")),
     (5, include_str!("../../migrations/0005_playlist_lifecycle_alternatives.sql")),
+    (6, include_str!("../../migrations/0006_track_loudness.sql")),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

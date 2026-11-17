@@ -537,6 +537,8 @@ pub struct AppSettings {
     pub oauth_port: u16,
     /// Automatic Spotify playlist sync interval (minutes, default 5).
     pub spotify_sync_interval_minutes: u64,
+    /// Scale in-app playback towards a common loudness (default on).
+    pub normalize_volume: bool,
     pub spotify_redirect_uri: String,
     pub soundcloud_redirect_uri: String,
     pub data_dir: String,
@@ -557,6 +559,7 @@ pub fn settings_get(state: S<'_>) -> AppResult<AppSettings> {
         lastfm_scrobble_spotify: settings::get_bool(&conn, settings::LASTFM_SCROBBLE_SPOTIFY, true)?,
         oauth_port: port,
         spotify_sync_interval_minutes: sync::interval(&conn).as_secs() / 60,
+        normalize_volume: settings::get_bool(&conn, settings::NORMALIZE_VOLUME, true)?,
         spotify_redirect_uri: oauth::redirect_uri(port, "spotify"),
         soundcloud_redirect_uri: oauth::redirect_uri(port, "soundcloud"),
         data_dir: state.paths.data_dir.to_string_lossy().into_owned(),
@@ -577,6 +580,7 @@ pub struct SettingsPatch {
     pub lastfm_scrobble_spotify: Option<bool>,
     pub oauth_port: Option<u16>,
     pub spotify_sync_interval_minutes: Option<u64>,
+    pub normalize_volume: Option<bool>,
 }
 
 #[tauri::command]
@@ -597,6 +601,9 @@ pub fn settings_update(state: S<'_>, patch: SettingsPatch) -> AppResult<AppSetti
         }
         if let Some(b) = patch.lastfm_scrobble_spotify {
             settings::set(&conn, settings::LASTFM_SCROBBLE_SPOTIFY, if b { "true" } else { "false" })?;
+        }
+        if let Some(b) = patch.normalize_volume {
+            settings::set(&conn, settings::NORMALIZE_VOLUME, if b { "true" } else { "false" })?;
         }
         if let Some(b) = patch.soundcloud_web_mode {
             settings::set(&conn, settings::SOUNDCLOUD_WEB_MODE, if b { "true" } else { "false" })?;
@@ -1233,6 +1240,64 @@ pub async fn soundcloud_resolve_stream(state: S<'_>, track_id: String) -> AppRes
         return state.soundcloud_web.resolve_stream(&t.provider_id).await;
     }
     Err(AppError::NotConnected { provider: "soundcloud".into() })
+}
+
+/// Serialises loudness analyses: one decode at a time, and a second request for
+/// the same track finds the first one's cached result.
+static LOUDNESS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Integrated loudness (LUFS) of a local or SoundCloud track for volume
+/// normalization, analysed on first request and cached. `None` when the track
+/// can't be measured (e.g. silence, unsupported codec, Spotify).
+#[tauri::command]
+pub async fn track_loudness(state: S<'_>, track_id: String) -> AppResult<Option<f64>> {
+    let t = library::get_track(&state.conn(), &track_id)?;
+    let key = match t.source {
+        Source::Local => {
+            let path = t.file_path.clone().ok_or_else(|| AppError::InvalidInput("local track has no file path".into()))?;
+            let meta = std::fs::metadata(&path)?;
+            let mtime = meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+            format!("file:{path}|{}|{mtime}", meta.len())
+        }
+        Source::Soundcloud => format!("soundcloud:{}", t.provider_id),
+        Source::Spotify => return Ok(None),
+    };
+    if let Some(v) = crate::loudness::cached(&state.conn(), &track_id, &key)? {
+        return Ok(v);
+    }
+    let _guard = LOUDNESS_LOCK.lock().await;
+    if let Some(v) = crate::loudness::cached(&state.conn(), &track_id, &key)? {
+        return Ok(v);
+    }
+    let measured = match t.source {
+        Source::Local => {
+            let path = PathBuf::from(t.file_path.unwrap_or_default());
+            tokio::task::spawn_blocking(move || crate::loudness::measure_file(&path))
+                .await
+                .map_err(|e| AppError::Other(format!("loudness task failed: {e}")))?
+        }
+        _ => {
+            // Transient failures (network, not connected) are not cached.
+            let stream = soundcloud_resolve_stream(state.clone(), track_id.clone()).await?;
+            if stream.preview {
+                return Ok(None);
+            }
+            let (bytes, ext) = crate::loudness::download_stream(&crate::http::client(), &stream.url, &stream.protocol).await?;
+            tokio::task::spawn_blocking(move || crate::loudness::measure_bytes(bytes, ext.as_deref()))
+                .await
+                .map_err(|e| AppError::Other(format!("loudness task failed: {e}")))?
+        }
+    };
+    let lufs = match measured {
+        Ok(v) => v,
+        Err(AppError::Io(e)) => return Err(AppError::Io(e)),
+        Err(e) => {
+            log::warn!("loudness analysis failed for {track_id}: {e}");
+            None
+        }
+    };
+    crate::loudness::store(&state.conn(), &track_id, &key, lufs)?;
+    Ok(lufs)
 }
 
 fn soundcloud_web_enabled(state: &AppState) -> AppResult<bool> {
