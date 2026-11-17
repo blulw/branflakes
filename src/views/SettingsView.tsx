@@ -564,7 +564,8 @@ function NormalizeVolume() {
         <Label htmlFor="normalize-volume">Consistent volume between songs</Label>
         <p className="text-xs text-muted-foreground">
           Measures each song's average loudness (LUFS) the first time it plays and adjusts its level so loud and quiet songs sound about the same. The volume
-          slider still controls overall volume. Applies to local files and SoundCloud; Spotify has its own "Normalize volume" setting in the Spotify app.
+          slider still controls overall volume. Spotify songs use the same song from your local files when you have it (on any device); otherwise the
+          in-app player measures the song while it plays, adjusting a few seconds in and remembering the result once most of the song has played.
         </p>
       </div>
     </div>

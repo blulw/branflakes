@@ -1225,18 +1225,22 @@ pub async fn soundcloud_import_library(app: AppHandle, state: S<'_>) -> AppResul
 #[tauri::command]
 pub async fn soundcloud_resolve_stream(state: S<'_>, track_id: String) -> AppResult<StreamInfo> {
     let t = library::get_track(&state.conn(), &track_id)?;
+    resolve_soundcloud_stream(&state, &t).await
+}
+
+async fn resolve_soundcloud_stream(state: &AppState, t: &Track) -> AppResult<StreamInfo> {
     if t.source != Source::Soundcloud {
         return Err(AppError::InvalidInput("not a SoundCloud track".into()));
     }
     if t.availability == crate::model::Availability::Unavailable {
-        return Err(AppError::Unsupported(t.unavailable_reason.unwrap_or_else(|| "track is unavailable".into())));
+        return Err(AppError::Unsupported(t.unavailable_reason.clone().unwrap_or_else(|| "track is unavailable".into())));
     }
     // Official API when connected; otherwise the opt-in unofficial web mode.
     if state.secrets.has(secrets::SOUNDCLOUD_TOKENS) {
-        let creds = soundcloud_creds(&state)?;
+        let creds = soundcloud_creds(state)?;
         return state.soundcloud.resolve_stream(&creds, &t.provider_id).await;
     }
-    if soundcloud_web_enabled(&state)? {
+    if soundcloud_web_enabled(state)? {
         return state.soundcloud_web.resolve_stream(&t.provider_id).await;
     }
     Err(AppError::NotConnected { provider: "soundcloud".into() })
@@ -1246,12 +1250,57 @@ pub async fn soundcloud_resolve_stream(state: S<'_>, track_id: String) -> AppRes
 /// the same track finds the first one's cached result.
 static LOUDNESS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Integrated loudness (LUFS) of a local or SoundCloud track for volume
-/// normalization, analysed on first request and cached. `None` when the track
-/// can't be measured (e.g. silence, unsupported codec, Spotify).
+/// Integrated loudness (LUFS) for volume normalization, analysed on first
+/// request and cached. `None` when it can't be measured (yet).
+///
+/// Spotify audio can't be decoded, so for a Spotify track this uses, in order:
+/// the same song in the local library (exact title + artist, same length),
+/// then a measurement captured live from the in-app player
+/// (`loudness_capture_*`). `None` means neither exists yet.
 #[tauri::command]
 pub async fn track_loudness(state: S<'_>, track_id: String) -> AppResult<Option<f64>> {
     let t = library::get_track(&state.conn(), &track_id)?;
+    if t.source != Source::Spotify {
+        return measured_loudness(&state, t).await;
+    }
+    if let Some(local) = local_copy(&state, &t)? {
+        match measured_loudness(&state, local).await {
+            Ok(Some(l)) => return Ok(Some(l)),
+            Ok(None) => {}
+            Err(e) => log::warn!("loudness of local copy failed: {e}"),
+        }
+    }
+    Ok(crate::loudness::cached(&state.conn(), &track_id, SPOTIFY_CAPTURE_KEY)?.flatten())
+}
+
+const SPOTIFY_CAPTURE_KEY: &str = "spotify:capture";
+
+/// The same recording in the local library, if there is one: exact title and
+/// primary artist, and (when both are known) a length within 3 seconds so a
+/// live version or remix isn't mistaken for it.
+fn local_copy(state: &AppState, t: &Track) -> AppResult<Option<Track>> {
+    use crate::alternatives::{rank, title_fragment};
+    let q = title_fragment(&t.title);
+    if q.chars().count() < 2 {
+        return Ok(None);
+    }
+    let found = library::list_tracks(
+        &state.conn(),
+        &library::TrackQuery { search: Some(q), source: Some(Source::Local), include_unavailable: Some(false), limit: Some(300), ..Default::default() },
+    )?;
+    Ok(rank(t, found)
+        .into_iter()
+        .filter(|r| r.score >= 100)
+        .find(|r| match (t.duration_ms, r.track.duration_ms) {
+            (Some(a), Some(b)) => a.abs_diff(b) <= 3_000,
+            _ => true,
+        })
+        .map(|r| r.track))
+}
+
+/// Decode-and-measure path for local files and SoundCloud streams.
+async fn measured_loudness(state: &AppState, t: Track) -> AppResult<Option<f64>> {
+    let track_id = t.id.clone();
     let key = match t.source {
         Source::Local => {
             let path = t.file_path.clone().ok_or_else(|| AppError::InvalidInput("local track has no file path".into()))?;
@@ -1278,7 +1327,7 @@ pub async fn track_loudness(state: S<'_>, track_id: String) -> AppResult<Option<
         }
         _ => {
             // Transient failures (network, not connected) are not cached.
-            let stream = soundcloud_resolve_stream(state.clone(), track_id.clone()).await?;
+            let stream = resolve_soundcloud_stream(state, &t).await?;
             if stream.preview {
                 return Ok(None);
             }
@@ -1298,6 +1347,41 @@ pub async fn track_loudness(state: S<'_>, track_id: String) -> AppResult<Option<
     };
     crate::loudness::store(&state.conn(), &track_id, &key, lufs)?;
     Ok(lufs)
+}
+
+/// Start measuring a Spotify track playing on the in-app device. `gain` is
+/// the player volume applied right now (0..1).
+#[tauri::command]
+pub fn loudness_capture_start(track_id: String, gain: f64, settle_ms: u64) {
+    crate::loudness_capture::start(&track_id, gain, Duration::from_millis(settle_ms));
+}
+
+/// The in-app player volume changed; audio is ignored for `settle_ms`.
+#[tauri::command]
+pub fn loudness_capture_gain(gain: f64, settle_ms: u64) {
+    crate::loudness_capture::set_gain(gain, Duration::from_millis(settle_ms));
+}
+
+#[tauri::command]
+pub fn loudness_capture_status() -> Option<crate::loudness_capture::CaptureStatus> {
+    crate::loudness_capture::status()
+}
+
+/// Stop measuring. The result is saved for the track when enough of it was
+/// heard (70 % of its length, or 90 s if the length is unknown); a short
+/// listen isn't representative of the whole song.
+#[tauri::command]
+pub fn loudness_capture_stop(state: S<'_>) -> AppResult<Option<f64>> {
+    let Some(st) = crate::loudness_capture::stop() else { return Ok(None) };
+    let Some(lufs) = st.lufs else { return Ok(None) };
+    let conn = state.conn();
+    let Ok(t) = library::get_track(&conn, &st.track_id) else { return Ok(None) };
+    let needed = t.duration_ms.map(|d| d as f64 / 1000.0 * 0.7).unwrap_or(90.0);
+    if t.source != Source::Spotify || st.seconds < needed {
+        return Ok(None);
+    }
+    crate::loudness::store(&conn, &st.track_id, SPOTIFY_CAPTURE_KEY, Some(lufs))?;
+    Ok(Some(lufs))
 }
 
 fn soundcloud_web_enabled(state: &AppState) -> AppResult<bool> {

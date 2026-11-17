@@ -162,7 +162,17 @@ export const usePlayer = create<PlayerState>((set, get) => {
   const spotifyEngine = new SpotifyConnectEngine(callbacks, {
     getDeviceId: () => get().spotifyDeviceId,
     onState: (state) => set({ spotifyState: state }),
+    getVolume: () => get().volume,
+    isInApp: () => isInAppSpotify(),
   });
+
+  /** Spotify is playing on this app's own Web Playback SDK device. */
+  function isInAppSpotify(): boolean {
+    const s = get();
+    if (!s.sdkDeviceId) return false;
+    if (s.spotifyDeviceId) return s.spotifyDeviceId === s.sdkDeviceId;
+    return s.spotifyState?.device?.id === s.sdkDeviceId;
+  }
 
   const engineFor = (source: Source): PlaybackEngine => (source === "spotify" ? spotifyEngine : audioEngine);
 
@@ -171,7 +181,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const s = get();
     if (!s.normalizeVolume || s.currentIndex == null) return;
     for (const t of [s.queue[s.currentIndex], s.queue[s.currentIndex + 1]]) {
-      if (t && t.source !== "spotify" && t.availability !== "unavailable") void api.trackLoudness(t.id).catch(() => undefined);
+      if (t && t.availability !== "unavailable") void api.trackLoudness(t.id).catch(() => undefined);
     }
   }
 
@@ -304,6 +314,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       try {
         const settings = await api.getSettings();
         audioEngine.setNormalize(settings.normalizeVolume);
+        spotifyEngine.setNormalize(settings.normalizeVolume);
         set({ normalizeVolume: settings.normalizeVolume });
       } catch {
         // keep the default
@@ -496,7 +507,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             toast.error(toApiError(e).message);
           }
         };
-        if (engine === spotifyEngine) {
+        if (engine === spotifyEngine && !isInAppSpotify()) {
           // Each Spotify volume change is a Web API call: debounce slider drags.
           if (volumeTimer != null) window.clearTimeout(volumeTimer);
           volumeTimer = window.setTimeout(() => void apply(), 350);
@@ -509,6 +520,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     async setNormalizeVolume(on) {
       audioEngine.setNormalize(on);
+      spotifyEngine.setNormalize(on);
       set({ normalizeVolume: on });
       if (on) prefetchLoudness();
       try {

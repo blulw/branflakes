@@ -55,7 +55,7 @@ fn k_weighting(rate: f64) -> (Biquad, Biquad) {
 
 /// Streaming integrated-loudness meter.
 pub struct Meter {
-    channels: usize,
+    pub(crate) channels: usize,
     shelf: Biquad,
     hp: Biquad,
     state: Vec<[[f64; 2]; 2]>,
@@ -113,6 +113,12 @@ impl Meter {
                 self.sub_pos = 0;
             }
         }
+    }
+
+    /// Seconds of audible (above the -70 LUFS absolute gate) audio measured so far.
+    pub fn audible_seconds(&self) -> f64 {
+        let thr = 10f64.powf((-70.0 + 0.691) / 10.0);
+        self.subs.iter().filter(|&&z| z > thr).count() as f64 / 10.0
     }
 
     /// Integrated loudness in LUFS, or None for silence / too-short input.

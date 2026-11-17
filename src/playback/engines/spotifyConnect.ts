@@ -5,15 +5,29 @@
 import { api } from "@/lib/api";
 import type { Source, SpotifyPlaybackState, Track } from "@/lib/types";
 import type { EngineCallbacks, PlaybackEngine } from "./types";
+import { sdkSetVolume } from "./spotifySdk";
+import { LOUDNESS_WAIT_MS, UNKNOWN_GAIN, effectiveVolume, gainDiffDb, normalizationGain } from "../normalize";
 
 const POLL_MS = 1500;
 /** How long after our own play command an unexpected track URI is treated as
  *  Spotify relinking (same song, market-specific copy) rather than a takeover. */
 const ADOPT_WINDOW_MS = 6000;
+/** Live capture: seconds of audio before the first adjustment, and limits on later ones. */
+const CAPTURE_FIRST_S = 6;
+const CAPTURE_POLL_MS = 1000;
+const CAPTURE_ADJUST_EVERY_MS = 5000;
+const CAPTURE_ADJUST_MIN_DB = 1;
+/** In-app volume glide: steps × interval. */
+const GLIDE_STEPS = 10;
+const GLIDE_STEP_MS = 100;
 
 export interface SpotifyConnectHooks {
   getDeviceId(): string | null;
   onState(state: SpotifyPlaybackState | null): void;
+  /** The user's volume (slider), 0..1. */
+  getVolume(): number;
+  /** Whether playback is on this app's own Web Playback SDK device. */
+  isInApp(): boolean;
 }
 
 export class SpotifyConnectEngine implements PlaybackEngine {
@@ -34,12 +48,173 @@ export class SpotifyConnectEngine implements PlaybackEngine {
   /** The track that was loaded before this one (Spotify may still report it briefly). */
   private prevUri: string | null = null;
 
+  // Volume normalization. Gain comes from a local copy of the song or a
+  // saved capture; otherwise the in-app player is measured live.
+  private normalize = true;
+  private gain = 1;
+  private loadToken = 0;
+  private lastRemoteVolume: number | null = null;
+  private glideTimer: number | null = null;
+  private captureFor: string | null = null;
+  private captureTimer: number | null = null;
+  private captureAdjusted = 0;
+
   constructor(
     private cb: EngineCallbacks,
     private hooks: SpotifyConnectHooks,
   ) {}
 
+  private effective(): number {
+    return effectiveVolume(this.hooks.getVolume(), this.normalize ? this.gain : 1);
+  }
+
+  /** Send the current effective volume to the device. */
+  private async applyVolume(settleMs = 400) {
+    const v = this.effective();
+    if (this.captureFor) void api.loudnessCaptureGain(v, settleMs).catch(() => undefined);
+    if (this.hooks.isInApp()) {
+      await sdkSetVolume(v);
+    } else {
+      const pct = Math.round(v * 100);
+      if (pct === this.lastRemoteVolume) return;
+      this.lastRemoteVolume = pct;
+      await api.spotifyControl("volume", this.hooks.getDeviceId(), pct);
+    }
+  }
+
+  private stopGlide() {
+    if (this.glideTimer != null) window.clearInterval(this.glideTimer);
+    this.glideTimer = null;
+  }
+
+  /** Move to a new track gain: a short glide on the in-app player, one step on remote devices. */
+  private setGain(g: number, glide: boolean) {
+    this.stopGlide();
+    if (!glide || !this.hooks.isInApp()) {
+      this.gain = g;
+      void this.applyVolume().catch(() => undefined);
+      return;
+    }
+    const from = this.gain;
+    let step = 0;
+    this.gain = g;
+    // Tell the capture the final level up front and skip audio until the glide is done.
+    if (this.captureFor) void api.loudnessCaptureGain(this.effective(), GLIDE_STEPS * GLIDE_STEP_MS + 400).catch(() => undefined);
+    this.glideTimer = window.setInterval(() => {
+      step++;
+      const cur = from + (g - from) * (step / GLIDE_STEPS);
+      void sdkSetVolume(effectiveVolume(this.hooks.getVolume(), this.normalize ? cur : 1)).catch(() => undefined);
+      if (step >= GLIDE_STEPS) this.stopGlide();
+    }, GLIDE_STEP_MS);
+  }
+
+  /** Turn loudness normalization on/off (affects the current track immediately). */
+  setNormalize(on: boolean) {
+    if (on === this.normalize) return;
+    this.normalize = on;
+    if (!on) {
+      void this.finishCapture();
+      this.stopGlide();
+      void this.applyVolume().catch(() => undefined);
+    } else if (this.trackId && this.active) {
+      const id = this.trackId;
+      const token = this.loadToken;
+      this.gain = 1;
+      void api
+        .trackLoudness(id)
+        .then((lufs) => {
+          if (token !== this.loadToken) return;
+          if (lufs != null) this.setGain(normalizationGain(lufs), true);
+          else if (this.hooks.isInApp()) void this.startCapture(id);
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  private async startCapture(trackId: string) {
+    await this.finishCapture();
+    this.captureFor = trackId;
+    this.captureAdjusted = 0;
+    try {
+      // Skip the first moments while playback starts.
+      await api.loudnessCaptureStart(trackId, this.effective(), 1500);
+    } catch {
+      this.captureFor = null;
+      return;
+    }
+    this.captureTimer = window.setInterval(() => void this.pollCapture(), CAPTURE_POLL_MS);
+  }
+
+  private async pollCapture() {
+    const id = this.captureFor;
+    if (!id) return;
+    const st = await api.loudnessCaptureStatus().catch(() => null);
+    if (!st || st.trackId !== id || this.captureFor !== id) return;
+    if (st.error) {
+      console.warn("Spotify loudness capture unavailable:", st.error);
+      this.setGain(1, true);
+      await this.finishCapture();
+      return;
+    }
+    if (st.lufs == null || st.seconds < CAPTURE_FIRST_S) return;
+    const target = normalizationGain(st.lufs);
+    const now = performance.now();
+    const diff = Math.abs(gainDiffDb(target, this.gain));
+    if (this.captureAdjusted === 0 ? diff > 0.3 : now - this.captureAdjusted >= CAPTURE_ADJUST_EVERY_MS && diff >= CAPTURE_ADJUST_MIN_DB) {
+      this.captureAdjusted = now;
+      this.setGain(target, true);
+    } else if (this.captureAdjusted === 0) {
+      this.captureAdjusted = now;
+    }
+  }
+
+  /** Stop live measurement; the backend keeps the result if enough was heard. */
+  private async finishCapture() {
+    if (this.captureTimer != null) window.clearInterval(this.captureTimer);
+    this.captureTimer = null;
+    if (!this.captureFor) return;
+    this.captureFor = null;
+    await api.loudnessCaptureStop().catch(() => undefined);
+  }
+
   async load(track: Track, startMs: number, autoplay: boolean) {
+    const token = ++this.loadToken;
+    await this.finishCapture();
+    this.stopGlide();
+    let needCapture = false;
+    if (this.normalize) {
+      let settled = false;
+      const lookup = api
+        .trackLoudness(track.id)
+        .then((lufs) => {
+          settled = true;
+          return lufs;
+        })
+        .catch(() => {
+          settled = true;
+          return null;
+        });
+      const first = await Promise.race([lookup, new Promise<undefined>((r) => setTimeout(() => r(undefined), LOUDNESS_WAIT_MS))]);
+      if (token !== this.loadToken) return;
+      if (first != null) {
+        this.gain = normalizationGain(first);
+      } else if (settled) {
+        // Nothing known: measure live on the in-app player.
+        this.gain = this.hooks.isInApp() ? UNKNOWN_GAIN : 1;
+        needCapture = this.hooks.isInApp();
+      } else {
+        this.gain = this.hooks.isInApp() ? UNKNOWN_GAIN : 1;
+        void lookup.then((lufs) => {
+          if (token !== this.loadToken) return;
+          if (lufs != null) this.setGain(normalizationGain(lufs), true);
+          else if (this.hooks.isInApp() && this.playing) void this.startCapture(track.id);
+        });
+      }
+    } else {
+      this.gain = 1;
+    }
+    // Remote devices only get a volume call when normalization changes it.
+    if (this.normalize || this.hooks.isInApp()) await this.applyVolume().catch(() => undefined);
     this.active = true;
     this.trackId = track.id;
     this.prevUri = this.uri;
@@ -57,6 +232,7 @@ export class SpotifyConnectEngine implements PlaybackEngine {
       this.cb.onPlaying(true);
     }
     this.startPolling();
+    if (needCapture && autoplay && token === this.loadToken) void this.startCapture(track.id);
   }
 
   private startPolling() {
@@ -157,11 +333,17 @@ export class SpotifyConnectEngine implements PlaybackEngine {
     this.cb.onTime(ms);
   }
 
-  async setVolume(v: number) {
-    await api.spotifyControl("volume", this.hooks.getDeviceId(), Math.round(v * 100));
+  async setVolume(_v: number) {
+    // The user's volume is read through hooks.getVolume(); the track gain is applied on top.
+    this.stopGlide();
+    this.lastRemoteVolume = null;
+    await this.applyVolume();
   }
 
   async release() {
+    this.loadToken++;
+    this.stopGlide();
+    await this.finishCapture();
     const wasPlaying = this.playing;
     this.active = false;
     this.playing = false;

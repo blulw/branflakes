@@ -97,6 +97,13 @@ export const api = {
   updateSettings: (patch: T.SettingsPatch) => call<T.AppSettings>("settings_update", { patch }),
   /** Integrated loudness (LUFS) of a local/SoundCloud track, analysed once and cached. */
   trackLoudness: (trackId: string) => call<number | null>("track_loudness", { trackId }),
+  /** Live loudness capture of the in-app Spotify player (Windows process loopback). */
+  loudnessCaptureStart: (trackId: string, gain: number, settleMs: number) => call<void>("loudness_capture_start", { trackId, gain, settleMs }),
+  loudnessCaptureGain: (gain: number, settleMs: number) => call<void>("loudness_capture_gain", { gain, settleMs }),
+  loudnessCaptureStatus: () =>
+    call<{ trackId: string; seconds: number; lufs: number | null; error: string | null } | null>("loudness_capture_status"),
+  /** Ends the capture; returns the saved LUFS when enough of the song was heard. */
+  loudnessCaptureStop: () => call<number | null>("loudness_capture_stop"),
   searchProviders: (query: string, spotifyOffset?: number) =>
     call<T.ProviderSearchResults>("search_providers", { query, spotifyOffset: spotifyOffset ?? null }),
 

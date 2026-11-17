@@ -1,9 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/api", () => ({ api: {} }));
-vi.mock("@/lib/tauri", () => ({ convertFileSrc: (p: string) => p }));
-
-import { NORMALIZE_TARGET_LUFS, effectiveVolume, normalizationGain } from "./engines/audioElement";
+import { describe, expect, it } from "vitest";
+import { NORMALIZE_TARGET_LUFS, effectiveVolume, gainDiffDb, normalizationGain } from "./normalize";
 
 describe("volume normalization", () => {
   it("leaves a track at the target untouched", () => {
@@ -19,5 +15,8 @@ describe("volume normalization", () => {
     expect(effectiveVolume(0.8, 0.5)).toBeCloseTo(0.4);
     expect(effectiveVolume(0.8, 2)).toBe(1);
     expect(effectiveVolume(0, 2)).toBe(0);
+  });
+  it("measures gain changes in dB", () => {
+    expect(gainDiffDb(1, 0.5)).toBeCloseTo(6.02, 2);
   });
 });

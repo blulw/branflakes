@@ -6,26 +6,9 @@ import { convertFileSrc } from "@/lib/tauri";
 import { api } from "@/lib/api";
 import type { Source, Track } from "@/lib/types";
 import type { EngineCallbacks, PlaybackEngine } from "./types";
+import { LOUDNESS_WAIT_MS, UNKNOWN_GAIN, effectiveVolume, normalizationGain } from "../normalize";
 
-/** Loudness every track is scaled towards when normalization is on (LUFS). */
-export const NORMALIZE_TARGET_LUFS = -14;
-/** Gain used until a track's loudness is known: assumes a typical modern master (~-9 LUFS). */
-const UNKNOWN_GAIN = 0.6;
-/** How long load() waits for the loudness lookup before starting playback. */
-const LOUDNESS_WAIT_MS = 300;
 const RAMP_MS = 500;
-
-/** Linear gain bringing a track at `lufs` to the target. Quieter tracks may get > 1. */
-export function normalizationGain(lufs: number | null): number {
-  if (lufs == null || !Number.isFinite(lufs)) return 1;
-  const g = Math.pow(10, (NORMALIZE_TARGET_LUFS - lufs) / 20);
-  return Math.min(4, Math.max(0.05, g));
-}
-
-/** Element volume for a user volume (slider) and per-track gain, clamped to 0..1. */
-export function effectiveVolume(userVolume: number, gain: number): number {
-  return Math.min(1, Math.max(0, userVolume * gain));
-}
 
 export class AudioElementEngine implements PlaybackEngine {
   readonly sources: readonly Source[] = ["local", "soundcloud"];

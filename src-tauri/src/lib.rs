@@ -15,6 +15,7 @@ pub mod sync;
 pub mod taskbar;
 pub mod alternatives;
 pub mod loudness;
+pub mod loudness_capture;
 
 use providers::{lastfm::LastFmAdapter, soundcloud::SoundCloudAdapter, spotify::SpotifyAdapter};
 use secrets::{KeyringStore, SecretStore};
@@ -174,6 +175,10 @@ pub fn run() {
             commands::soundcloud_import_library,
             commands::soundcloud_resolve_stream,
             commands::track_loudness,
+            commands::loudness_capture_start,
+            commands::loudness_capture_gain,
+            commands::loudness_capture_status,
+            commands::loudness_capture_stop,
             commands::soundcloud_web_import,
             commands::search_providers,
             commands::lastfm_connect,
