@@ -6,6 +6,7 @@ import { api, toApiError } from "@/lib/api";
 import { activeLine, isSectionHeader } from "@/lib/lyrics";
 import type { Lyrics, LyricsSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { formatDuration } from "@/lib/format";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 
@@ -177,8 +178,9 @@ export function SyncedLyrics({ lyrics, trackId, big = false }: { lyrics: Lyrics;
   const lines = lyrics.synced ?? [];
   const positionMs = usePlayer((s) => s.positionMs);
   const loaded = usePlayer((s) => s.loadedTrackId === trackId);
-  const canSeek = usePlayer((s) => s.loadedTrackId === trackId && s.controls().seek.enabled);
-  const seek = usePlayer((s) => s.seek);
+  // Any line of the current track can be clicked: it jumps there (starting the track if needed).
+  const canSeek = usePlayer((s) => s.canPlayFromLyric(trackId));
+  const playFromLyric = usePlayer((s) => s.playFromLyric);
   const { index: active, singing } = loaded ? activeLine(lines, positionMs) : { index: -1, singing: false };
   const containerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLElement | null)[]>([]);
@@ -226,16 +228,17 @@ export function SyncedLyrics({ lyrics, trackId, big = false }: { lyrics: Lyrics;
               canSeek
                 ? () => {
                     manualUntil.current = 0;
-                    void seek(line.timeMs);
+                    void playFromLyric(trackId, line.timeMs);
                   }
                 : undefined
             }
+            title={canSeek ? `Play from ${formatDuration(line.timeMs)}` : undefined}
             aria-current={current ? "true" : undefined}
             className={cn(
               "block w-full text-left font-semibold leading-snug transition-colors duration-300",
               big ? "py-2.5 text-3xl" : "py-1.5 text-lg",
               current ? "text-foreground" : i <= active ? "text-muted-foreground/60" : "text-muted-foreground",
-              canSeek && "cursor-pointer hover:text-foreground/80",
+              canSeek && "-mx-2 w-[calc(100%+1rem)] cursor-pointer rounded-md px-2 hover:bg-foreground/5 hover:text-foreground/90",
             )}
           >
             {line.text || "♪"}

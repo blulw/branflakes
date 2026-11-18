@@ -63,6 +63,10 @@ export interface PlayerState {
   next(userInitiated?: boolean): Promise<void>;
   previous(): Promise<void>;
   seek(ms: number): Promise<void>;
+  /** Clicked lyric line: jump to `ms` in the current track and play (loading it first if needed). */
+  playFromLyric(trackId: string, ms: number): Promise<void>;
+  /** Whether the current track can be started at, or moved to, a given time. */
+  canPlayFromLyric(trackId: string): boolean;
   setVolume(v: number): Promise<void>;
   setNormalizeVolume(on: boolean): Promise<void>;
   cycleRepeat(): void;
@@ -495,6 +499,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
       } catch (e) {
         toast.error(toApiError(e).message);
       }
+    },
+
+    canPlayFromLyric(trackId) {
+      const s = get();
+      const t = s.currentTrack();
+      if (!t || t.id !== trackId) return false;
+      if (s.loadedTrackId === trackId && s.status !== "error") return s.controls().seek.enabled;
+      const caps = s.providers[t.source]?.capabilities;
+      return !!caps?.play && !!caps.seek && t.availability !== "unavailable";
+    },
+
+    async playFromLyric(trackId, ms) {
+      activateSdkElement();
+      const s = get();
+      if (!s.canPlayFromLyric(trackId)) return;
+      // Not loaded yet (e.g. restored after a restart): start it right at the line.
+      if (s.loadedTrackId !== trackId || !activeEngine || s.status === "error") {
+        await startCurrent(true, Math.max(0, ms));
+        return;
+      }
+      await s.seek(ms);
+      if (get().status === "paused") await get().togglePlay();
     },
 
     async setVolume(v) {
