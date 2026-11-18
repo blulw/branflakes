@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Loader2, Minimize2, Music2 } from "lucide-react";
+import { Loader2, Minimize2, Music2, Volume1, Volume2, VolumeX } from "lucide-react";
 import { Artwork } from "./Artwork";
 import { SyncedLyrics, useLyrics } from "./LyricsPanel";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { Transport } from "./PlayerBar";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 
@@ -57,7 +59,7 @@ export function FullscreenView() {
   }, [setFullscreen]);
 
   const info = track ? (
-    <div className="flex w-[min(42vh,32vw)] min-w-56 flex-col">
+    <div className="flex w-[min(38vh,32vw)] min-w-72 flex-col">
       <Artwork src={track.artwork} className="aspect-square w-full shadow-2xl" alt={`${track.title} artwork`} />
       <h1 className="mt-6 text-3xl font-bold leading-tight tracking-tight" data-selectable>
         {track.title}
@@ -71,9 +73,16 @@ export function FullscreenView() {
           <Music2 className="size-4" /> Instrumental
         </p>
       )}
+      <div className="mt-6">
+        <Transport large />
+      </div>
+      <VolumeRow />
     </div>
   ) : (
-    <p className="text-lg text-muted-foreground">Nothing playing</p>
+    <div className="flex w-72 flex-col items-center gap-6">
+      <p className="text-lg text-muted-foreground">Nothing playing</p>
+      <Transport large />
+    </div>
   );
 
   return (
@@ -101,6 +110,22 @@ export function FullscreenView() {
       ) : (
         <div className="relative grid h-full place-items-center">{info}</div>
       )}
+    </div>
+  );
+}
+
+function VolumeRow() {
+  const volume = usePlayer((s) => s.volume);
+  const setVolume = usePlayer((s) => s.setVolume);
+  const enabled = usePlayer((s) => s.controls().volume.enabled);
+  if (!enabled) return null;
+  const Icon = volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  return (
+    <div className="mx-auto mt-3 flex w-48 items-center gap-2 text-muted-foreground">
+      <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={volume === 0 ? "Unmute" : "Mute"} onClick={() => void setVolume(volume === 0 ? 0.8 : 0)}>
+        <Icon className="size-4" />
+      </Button>
+      <Slider aria-label="Volume" min={0} max={100} step={1} value={[Math.round(volume * 100)]} onValueChange={([v]) => void setVolume(v / 100)} />
     </div>
   );
 }
