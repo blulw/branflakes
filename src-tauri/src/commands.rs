@@ -393,6 +393,61 @@ pub fn playlist_move_item(state: S<'_>, id: String, from: usize, to: usize) -> A
     Ok(())
 }
 
+// ======================================================= shared playlists
+
+/// Save a playlist as a `.bran` file (tracks, order, name, cover, and the
+/// audio of local tracks).
+#[tauri::command]
+pub async fn playlist_export_bran(app: AppHandle, state: S<'_>, id: String, path: String) -> AppResult<crate::share::ExportReport> {
+    let mut dest = PathBuf::from(&path);
+    if !dest.extension().is_some_and(|e| e.eq_ignore_ascii_case(crate::share::EXTENSION)) {
+        dest.set_extension(crate::share::EXTENSION);
+    }
+    let conn = state.open_worker_connection()?;
+    let version = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || crate::share::export_playlist(&conn, &id, &dest, &version))
+        .await
+        .map_err(|e| AppError::Other(format!("export task failed: {e}")))?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranSummary {
+    pub name: String,
+    pub tracks: u32,
+    pub local_files: u32,
+    pub app_version: String,
+}
+
+/// Read a `.bran` file's name and size without importing it.
+#[tauri::command]
+pub async fn playlist_inspect_bran(path: String) -> AppResult<BranSummary> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let m = crate::share::inspect(Path::new(&path))?;
+        let files: std::collections::HashSet<_> = m.tracks.iter().filter_map(|t| t.file.clone()).collect();
+        Ok(BranSummary { name: m.playlist.name, tracks: m.tracks.len() as u32, local_files: files.len() as u32, app_version: m.app_version })
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("read task failed: {e}")))?
+}
+
+/// Import a `.bran` file as a new playlist.
+#[tauri::command]
+pub async fn playlist_import_bran(state: S<'_>, path: String) -> AppResult<crate::share::ImportReport> {
+    let conn = state.open_worker_connection()?;
+    let shared = state.paths.shared_dir.clone();
+    let art = state.paths.artwork_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::share::import_playlist(&conn, Path::new(&path), &shared, &art))
+        .await
+        .map_err(|e| AppError::Other(format!("import task failed: {e}")))?
+}
+
+/// `.bran` files the app was opened with that the UI hasn't handled yet.
+#[tauri::command]
+pub fn bran_take_pending() -> Vec<String> {
+    crate::share::take_pending()
+}
+
 // ================================================================== queue
 
 #[tauri::command]

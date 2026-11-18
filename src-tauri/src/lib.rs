@@ -17,12 +17,13 @@ pub mod alternatives;
 pub mod loudness;
 pub mod loudness_capture;
 pub mod lyrics;
+pub mod share;
 
 use providers::{lastfm::LastFmAdapter, soundcloud::SoundCloudAdapter, spotify::SpotifyAdapter};
 use secrets::{KeyringStore, SecretStore};
 use state::{AppPaths, AppState};
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,7 +31,23 @@ pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,reqwest=warn,hyper=warn,hyper_util=warn"))
         .init();
 
+    // `.bran` files the app was opened with (double-click / "Open with").
+    share::push_pending(share::bran_args(std::env::args()));
+
     tauri::Builder::default()
+        // Must be first: a second launch (e.g. double-clicking a .bran while
+        // the app runs) hands its arguments to this instance and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let files = share::bran_args(argv);
+            if !files.is_empty() {
+                share::push_pending(files);
+                let _ = app.emit("bran-open", ());
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -43,6 +60,8 @@ pub fn run() {
             // library folders (and nothing else).
             commands::allow_asset_dir(app.handle(), &paths.artwork_dir);
             std::fs::create_dir_all(&paths.artwork_dir)?;
+            commands::allow_asset_dir(app.handle(), &paths.shared_dir);
+            std::fs::create_dir_all(&paths.shared_dir)?;
             for f in db::library::list_folders(&conn)? {
                 commands::allow_asset_dir(app.handle(), std::path::Path::new(&f.path));
             }
@@ -141,6 +160,10 @@ pub fn run() {
             commands::playlist_add_tracks,
             commands::playlist_remove_item,
             commands::playlist_move_item,
+            commands::playlist_export_bran,
+            commands::playlist_inspect_bran,
+            commands::playlist_import_bran,
+            commands::bran_take_pending,
             commands::queue_get,
             commands::queue_replace,
             commands::queue_add,

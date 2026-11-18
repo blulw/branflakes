@@ -431,3 +431,27 @@ export interface MediaUpdate {
   canPlayPause?: boolean;
   canNext?: boolean;
 }
+
+/** `.bran` shared playlist files. */
+export interface BranExportReport {
+  path: string;
+  tracks: number;
+  localFiles: number;
+  bytes: number;
+  /** Local tracks whose file couldn't be read (shared as metadata only). */
+  missing: string[];
+}
+
+export interface BranImportReport {
+  playlist: Playlist;
+  tracks: number;
+  localFiles: number;
+  skipped: string[];
+}
+
+export interface BranSummary {
+  name: string;
+  tracks: number;
+  localFiles: number;
+  appVersion: string;
+}

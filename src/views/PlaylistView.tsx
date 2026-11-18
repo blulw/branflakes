@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AlertCircle, ImagePlus, Link2, Pencil, Play, Plus, RefreshCw, ScanSearch, Trash2, Unlink } from "lucide-react";
+import { AlertCircle, ImagePlus, Link2, Pencil, Play, Plus, RefreshCw, ScanSearch, Share2, Trash2, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { TrackTable } from "@/components/TrackTable";
 import { PlaylistCover } from "@/components/PlaylistCover";
@@ -12,6 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAsync } from "@/hooks/useAsync";
 import { api, toApiError } from "@/lib/api";
+import { exportPlaylistAsBran } from "@/lib/bran";
 import { formatDuration } from "@/lib/format";
 import { sortPlaylistTracks, TRACK_SORT_LABEL, type PlaylistTrackSort } from "@/lib/playlistSort";
 import { cn } from "@/lib/utils";
@@ -349,6 +350,15 @@ export function PlaylistView({ id }: { id: string }) {
                 {linking ? <RefreshCw className="size-4 animate-spin" /> : <Link2 className="size-4" />} Sync with Spotify
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Share playlist"
+              title="Save as a .bran file to share (includes local songs and the cover)"
+              onClick={() => void exportPlaylistAsBran(playlist)}
+            >
+              <Share2 className="size-4" />
+            </Button>
             <Button
               size="sm"
               variant="ghost"
