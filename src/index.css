@@ -111,7 +111,7 @@ html[data-translucent] .bg-popover {
   backdrop-filter: blur(var(--surface-blur, 0px)) saturate(1.2);
 }
 
-/* Themes: glow (strength in --glow, 0–1). */
+/* Themes: glow (strength in --glow, 0â€“1). */
 html[data-glow] .bg-primary {
   box-shadow: 0 0 calc(var(--glow) * 18px) color-mix(in srgb, var(--glow-color) 65%, transparent);
 }
