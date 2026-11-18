@@ -572,6 +572,27 @@ function NormalizeVolume() {
   );
 }
 
+function LyricsSources() {
+  const { settings, refreshSettings } = useUi();
+  if (!settings) return null;
+  return (
+    <div className="flex items-start gap-3">
+      <Switch
+        id="lyrics-extra-sources"
+        checked={settings.lyricsExtraSources}
+        onCheckedChange={(c) => void guard(() => api.updateSettings({ lyricsExtraSources: c })).then(() => refreshSettings())}
+      />
+      <div className="space-y-1">
+        <Label htmlFor="lyrics-extra-sources">More synced lyrics (Musixmatch, NetEase)</Label>
+        <p className="text-xs text-muted-foreground">
+          Lyrics always use Genius's words. Timing comes from LRCLIB; with this on, songs LRCLIB doesn't have are also timed from Musixmatch and NetEase Cloud
+          Music (unofficial access). Only the song's title, artist, album and length are sent.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function General() {
   const { settings, refreshSettings } = useUi();
   const { data: info } = useAsync(() => api.appInfo(), []);
@@ -584,6 +605,7 @@ function General() {
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <NormalizeVolume />
+        <LyricsSources />
         <div className="flex items-end gap-2">
           <Field id="port" label="OAuth loopback port" className="w-32" placeholder={String(settings.oauthPort)} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} />
           <Button size="sm" variant="secondary" disabled={!port} onClick={() => void guard(() => api.updateSettings({ oauthPort: Number(port) }), "Saved — update the redirect URIs in your Spotify/SoundCloud apps").then(() => (setPort(""), refreshSettings()))}>

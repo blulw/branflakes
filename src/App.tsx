@@ -17,6 +17,7 @@ import { QueueView } from "@/views/QueueView";
 import { SearchView } from "@/views/SearchView";
 import { SettingsView } from "@/views/SettingsView";
 import { TrackEditorDialog } from "@/views/TrackEditorDialog";
+import { LyricsPanel } from "@/components/LyricsPanel";
 
 function CurrentView() {
   const view = useUi((s) => s.view);
@@ -43,6 +44,7 @@ function CurrentView() {
 }
 
 export default function App() {
+  const lyricsOpen = useUi((s) => s.lyricsOpen);
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
@@ -97,6 +99,7 @@ export default function App() {
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
             <CurrentView />
           </main>
+          {lyricsOpen && <LyricsPanel />}
         </div>
         <PlayerBar />
       </div>

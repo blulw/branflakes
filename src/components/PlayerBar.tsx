@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AlertCircle, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, Loader2 } from "lucide-react";
+import { AlertCircle, MicVocal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Artwork } from "./Artwork";
 import { SourceBadge } from "./SourceBadge";
 import { DevicePicker } from "./DevicePicker";
@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { usePlayer } from "@/playback/store";
+import { useUi } from "@/state/ui";
 import type { ControlState } from "@/playback/controls";
 
 function Ctl({ state, label, onClick, children, className }: { state: ControlState; label: string; onClick: () => void; children: React.ReactNode; className?: string }) {
@@ -43,6 +44,8 @@ export function PlayerBar() {
   const [scrub, setScrub] = useState<number | null>(null);
   const duration = st.durationMs ?? track?.durationMs ?? null;
   const position = scrub ?? st.positionMs;
+  const lyricsOpen = useUi((s) => s.lyricsOpen);
+  const toggleLyrics = useUi((s) => s.toggleLyrics);
 
   useEffect(() => {
     setScrub(null);
@@ -163,6 +166,21 @@ export function PlayerBar() {
 
       {/* Device + volume */}
       <div className="flex items-center justify-end gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("size-8", lyricsOpen && "text-primary")}
+              aria-label={lyricsOpen ? "Hide lyrics" : "Show lyrics"}
+              aria-pressed={lyricsOpen}
+              onClick={toggleLyrics}
+            >
+              <MicVocal className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{lyricsOpen ? "Hide lyrics" : "Lyrics"}</TooltipContent>
+        </Tooltip>
         {track?.source === "spotify" && c.deviceSelection.enabled && <DevicePicker />}
         {c.volume.enabled ? (
           <div className="flex w-36 items-center gap-2">

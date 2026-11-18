@@ -104,6 +104,8 @@ export const api = {
     call<{ trackId: string; seconds: number; lufs: number | null; error: string | null } | null>("loudness_capture_status"),
   /** Ends the capture; returns the saved LUFS when enough of the song was heard. */
   loudnessCaptureStop: () => call<number | null>("loudness_capture_stop"),
+  /** Lyrics (Genius text, LRCLIB time-synced lines), cached per track. `null` = none found. */
+  getLyrics: (trackId: string, refresh = false) => call<T.Lyrics | null>("lyrics_get", { trackId, refresh }),
   searchProviders: (query: string, spotifyOffset?: number) =>
     call<T.ProviderSearchResults>("search_providers", { query, spotifyOffset: spotifyOffset ?? null }),
 

@@ -21,6 +21,8 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (4, include_str!("../../migrations/0004_spotify_playlist_sync.sql")),
     (5, include_str!("../../migrations/0005_playlist_lifecycle_alternatives.sql")),
     (6, include_str!("../../migrations/0006_track_loudness.sql")),
+    (7, include_str!("../../migrations/0007_lyrics_cache.sql")),
+    (8, include_str!("../../migrations/0008_lyrics_cache_complete.sql")),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
