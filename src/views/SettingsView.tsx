@@ -31,7 +31,7 @@ async function guard<T>(fn: () => Promise<T>, ok?: string): Promise<T | undefine
 export function SettingsView() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-6 pb-10 pt-5">
+      <div className="mx-auto max-w-4xl px-4 pb-10 pt-5 @xl:px-6">
         <h1 className="mb-4 text-2xl font-semibold tracking-tight">Settings & accounts</h1>
         <Tabs defaultValue="accounts">
           <TabsList>
@@ -170,7 +170,7 @@ function Accounts() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
             <Field id="sp-id" label="Client ID" value={v("spotifyClientId", settings.spotifyClientId)} onChange={(e) => setForm({ ...form, spotifyClientId: e.target.value })} />
             <Field id="sp-redirect" label="Redirect URI (add this to your Spotify app)" value={settings.spotifyRedirectUri} readOnly data-selectable />
           </div>
@@ -224,7 +224,7 @@ function Accounts() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
             <Field id="sc-id" label="Client ID" value={v("soundcloudClientId", settings.soundcloudClientId)} onChange={(e) => setForm({ ...form, soundcloudClientId: e.target.value })} />
             <Field
               id="sc-secret"
@@ -274,7 +274,7 @@ function Accounts() {
           <CardDescription>Create an API account at last.fm/api/account/create. Scrobbles are sent for local files, Spotify and SoundCloud tracks.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
             <Field id="lf-key" label="API key" value={v("lastfmApiKey", settings.lastfmApiKey)} onChange={(e) => setForm({ ...form, lastfmApiKey: e.target.value })} />
             <Field
               id="lf-secret"

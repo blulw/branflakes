@@ -18,6 +18,7 @@ import { SearchView } from "@/views/SearchView";
 import { SettingsView } from "@/views/SettingsView";
 import { TrackEditorDialog } from "@/views/TrackEditorDialog";
 import { LyricsPanel } from "@/components/LyricsPanel";
+import { computeLayout, useWindowWidth } from "@/lib/layout";
 
 function CurrentView() {
   const view = useUi((s) => s.view);
@@ -45,6 +46,7 @@ function CurrentView() {
 
 export default function App() {
   const lyricsOpen = useUi((s) => s.lyricsOpen);
+  const layout = computeLayout(useWindowWidth(), lyricsOpen);
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
@@ -95,11 +97,12 @@ export default function App() {
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full flex-col">
         <div className="flex min-h-0 flex-1">
-          <Sidebar />
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <Sidebar mode={layout.sidebarMode} width={layout.sidebarWidth} />
+          {/* Kept mounted (just hidden) so the view keeps its state when lyrics take over. */}
+          <main className={layout.showMain ? "@container flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
             <CurrentView />
           </main>
-          {lyricsOpen && <LyricsPanel />}
+          {lyricsOpen && <LyricsPanel docked={layout.lyricsDocked} />}
         </div>
         <PlayerBar />
       </div>

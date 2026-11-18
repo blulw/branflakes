@@ -67,6 +67,8 @@ export interface PlayerState {
   setNormalizeVolume(on: boolean): Promise<void>;
   cycleRepeat(): void;
   shuffleUpcoming(): Promise<void>;
+  /** Shuffle on: shuffles what's upcoming. Shuffle off: just turns it off (the order stays). */
+  toggleShuffle(): Promise<void>;
   refreshSpotifyDevices(): Promise<void>;
   selectSpotifyDevice(id: string | null): Promise<void>;
   setSdkDevice(id: string | null): void;
@@ -539,6 +541,15 @@ export const usePlayer = create<PlayerState>((set, get) => {
     async shuffleUpcoming() {
       get().applySnapshot(await api.shuffleUpcoming());
       set({ shuffle: true });
+    },
+
+    async toggleShuffle() {
+      if (get().shuffle) {
+        set({ shuffle: false });
+        await persist();
+        return;
+      }
+      await get().shuffleUpcoming();
     },
 
     async refreshSpotifyDevices() {

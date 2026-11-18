@@ -21,7 +21,8 @@ const SOURCE_NAME: Record<LyricsSource, string> = {
   netease: "NetEase Cloud Music",
 };
 
-export function LyricsPanel() {
+/** `docked`: fixed width beside the main view; otherwise it fills the window. */
+export function LyricsPanel({ docked = true }: { docked?: boolean }) {
   const track = usePlayer((s) => s.currentTrack());
   const toggleLyrics = useUi((s) => s.toggleLyrics);
   const [load, setLoad] = useState<Load>({ status: "idle" });
@@ -57,7 +58,7 @@ export function LyricsPanel() {
   const showSynced = !!lyrics?.synced?.length;
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l bg-sidebar xl:w-96" aria-label="Lyrics">
+    <aside className={cn("flex flex-col border-l bg-sidebar", docked ? "w-80 shrink-0 xl:w-96" : "min-w-0 flex-1")} aria-label="Lyrics">
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Lyrics</h2>

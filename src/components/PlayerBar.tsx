@@ -21,7 +21,7 @@ function Ctl({ state, label, onClick, children, className }: { state: ControlSta
       aria-label={label}
       disabled={!state.enabled}
       onClick={onClick}
-      className={cn("size-9 rounded-full", className)}
+      className={cn("size-8 rounded-full @xl/player:size-9", className)}
     >
       {children}
     </Button>
@@ -55,13 +55,14 @@ export function PlayerBar() {
   const RepeatIcon = st.repeatMode === "one" ? Repeat1 : Repeat;
 
   return (
-    <footer className="grid h-24 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-4 border-t bg-sidebar px-4">
+    <footer className="@container/player h-24 shrink-0 border-t bg-sidebar">
+     <div className="grid h-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 @2xl/player:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] @2xl/player:gap-4 @2xl/player:px-4">
       {/* Now playing */}
       <div className="flex min-w-0 items-center gap-3">
         {track ? (
           <>
             <Artwork src={track.artwork} className="size-14 shrink-0" alt={`${track.title} artwork`} />
-            <div className="min-w-0">
+            <div className="hidden min-w-0 @2xl/player:block">
               <div className="flex items-center gap-2">
                 <span className="truncate font-medium" data-selectable>
                   {track.title}
@@ -92,14 +93,14 @@ export function PlayerBar() {
             </div>
           </>
         ) : (
-          <span className="text-sm text-muted-foreground">Nothing playing</span>
+          <span className="hidden text-sm text-muted-foreground @2xl/player:inline">Nothing playing</span>
         )}
       </div>
 
       {/* Transport */}
-      <div className="flex flex-col items-center gap-1">
+      <div className="flex min-w-0 flex-col items-center gap-1">
         <div className="flex items-center gap-1">
-          <Ctl state={{ enabled: st.queue.length > 1 }} label="Shuffle upcoming" onClick={() => void st.shuffleUpcoming()} className={cn(st.shuffle && "text-primary")}>
+          <Ctl state={{ enabled: st.queue.length > 1 }} label={st.shuffle ? "Shuffle on (click to turn off)" : "Shuffle upcoming"} onClick={() => void st.toggleShuffle()} className={cn(st.shuffle && "text-primary")}>
             <Shuffle className="size-4" />
           </Ctl>
           <Ctl state={c.previous} label="Previous" onClick={() => void st.previous()}>
@@ -109,7 +110,7 @@ export function PlayerBar() {
             state={c.playPause}
             label={st.status === "playing" ? "Pause" : "Play"}
             onClick={() => void st.togglePlay()}
-            className="size-11 bg-foreground text-background hover:bg-foreground/90 hover:text-background disabled:bg-muted disabled:text-muted-foreground"
+            className="size-10 @xl/player:size-11 bg-foreground text-background hover:bg-foreground/90 hover:text-background disabled:bg-muted disabled:text-muted-foreground"
           >
             {st.status === "loading" ? (
               <Loader2 className="size-5 animate-spin" />
@@ -127,7 +128,7 @@ export function PlayerBar() {
           </Ctl>
         </div>
         <div className="flex w-full max-w-xl items-center gap-2 text-[11px] tabular-nums text-muted-foreground">
-          <span className="w-10 text-right">{c.showPosition ? formatDuration(position) : ""}</span>
+          <span className="w-9 shrink-0 text-right">{c.showPosition ? formatDuration(position) : ""}</span>
           {c.seek.enabled ? (
             <Slider
               aria-label="Seek"
@@ -154,7 +155,7 @@ export function PlayerBar() {
               <TooltipContent>{c.seek.reason}</TooltipContent>
             </Tooltip>
           )}
-          <span className="w-10">{c.showDuration ? formatDuration(duration) : ""}</span>
+          <span className="w-9 shrink-0">{c.showDuration ? formatDuration(duration) : ""}</span>
         </div>
         {(c.blocker || st.error) && (
           <div className="flex items-center gap-1 text-[11px] text-destructive">
@@ -165,7 +166,7 @@ export function PlayerBar() {
       </div>
 
       {/* Device + volume */}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end gap-1 @2xl/player:gap-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -183,11 +184,11 @@ export function PlayerBar() {
         </Tooltip>
         {track?.source === "spotify" && c.deviceSelection.enabled && <DevicePicker />}
         {c.volume.enabled ? (
-          <div className="flex w-36 items-center gap-2">
+          <div className="flex items-center gap-2 @3xl/player:w-28 @5xl/player:w-36">
             <Button variant="ghost" size="icon" className="size-8" aria-label={st.volume === 0 ? "Unmute" : "Mute"} onClick={() => void st.setVolume(st.volume === 0 ? 0.8 : 0)}>
               <VolumeIcon className="size-4" />
             </Button>
-            <Slider aria-label="Volume" min={0} max={100} step={1} value={[Math.round(st.volume * 100)]} onValueChange={([v]) => void st.setVolume(v / 100)} />
+            <Slider className="hidden @3xl/player:flex" aria-label="Volume" min={0} max={100} step={1} value={[Math.round(st.volume * 100)]} onValueChange={([v]) => void st.setVolume(v / 100)} />
           </div>
         ) : (
           track && (
@@ -202,6 +203,7 @@ export function PlayerBar() {
           )
         )}
       </div>
+     </div>
     </footer>
   );
 }

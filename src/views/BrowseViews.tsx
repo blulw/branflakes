@@ -15,14 +15,14 @@ export function ArtistsView() {
   const list = (data ?? []).filter((a) => a.name.toLowerCase().includes(f));
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-end justify-between gap-4 px-6 pb-3 pt-5">
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-5 @xl:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Artists</h1>
           <p className="text-xs text-muted-foreground">{list.length} artists across all sources</p>
         </div>
-        <Input className="h-8 w-64" placeholder="Filter artists" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter artists" />
+        <Input className="h-8 w-full @xl:w-64" placeholder="Filter artists" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter artists" />
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 @xl:px-4">
         {list.map((a) => (
           <button
             key={a.name}
@@ -30,8 +30,10 @@ export function ArtistsView() {
             className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
           >
             <span className="flex-1 truncate font-medium">{a.name}</span>
-            <SourceBadges sources={a.sources} />
-            <span className="w-20 text-right text-xs tabular-nums text-muted-foreground">{a.trackCount} tracks</span>
+            <span className="hidden @sm:contents">
+              <SourceBadges sources={a.sources} />
+            </span>
+            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{a.trackCount} tracks</span>
           </button>
         ))}
         {list.length === 0 && <p className="p-6 text-sm text-muted-foreground">No artists yet.</p>}
@@ -49,14 +51,14 @@ export function AlbumsView() {
   const list = (data ?? []).filter((a) => a.name.toLowerCase().includes(f) || a.artist.toLowerCase().includes(f));
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-end justify-between gap-4 px-6 pb-3 pt-5">
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-4 pb-3 pt-5 @xl:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Albums</h1>
           <p className="text-xs text-muted-foreground">{list.length} albums</p>
         </div>
-        <Input className="h-8 w-64" placeholder="Filter albums" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter albums" />
+        <Input className="h-8 w-full @xl:w-64" placeholder="Filter albums" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter albums" />
       </header>
-      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 overflow-y-auto px-6 pb-6">
+      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2 overflow-y-auto px-4 pb-6 @xl:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] @xl:gap-4 @xl:px-6">
         {list.map((a) => (
           <button key={`${a.name}|${a.artist}`} onClick={() => navigate({ name: "album", album: a.name, artist: a.artist })} className="group rounded-lg p-2 text-left hover:bg-accent">
             <Artwork src={a.artwork} className="aspect-square w-full" alt={`${a.name} cover`} />

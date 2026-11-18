@@ -61,16 +61,20 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
     </button>
   );
 
-  const cols = showAlbum ? "grid-cols-[2.5rem_minmax(0,3fr)_minmax(0,2fr)_6.5rem_4rem_2.5rem]" : "grid-cols-[2.5rem_minmax(0,3fr)_6.5rem_4rem_2.5rem]";
+  // Columns drop out as the main view narrows: album, then source, then time.
+  const cols = cn(
+    "grid-cols-[2rem_minmax(0,1fr)_2rem] gap-2 px-2 @sm:grid-cols-[2rem_minmax(0,1fr)_3rem_2rem] @xl:grid-cols-[2.5rem_minmax(0,3fr)_6.5rem_4rem_2.5rem] @xl:gap-3 @xl:px-4",
+    showAlbum && "@3xl:grid-cols-[2.5rem_minmax(0,3fr)_minmax(0,2fr)_6.5rem_4rem_2.5rem]",
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className={cn("grid items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground", cols)}>
+      <div className={cn("grid items-center border-b py-2 text-xs font-medium text-muted-foreground", cols)}>
         <span className="text-right">#</span>
         {header("title", "Title")}
-        {showAlbum && header("album", "Album")}
-        {header("source", "Source")}
-        {header("duration", "Time", "justify-end")}
+        {showAlbum && header("album", "Album", "hidden @3xl:flex")}
+        {header("source", "Source", "hidden @xl:flex")}
+        {header("duration", "Time", "hidden justify-end @sm:flex")}
         <span />
       </div>
       <div
@@ -97,7 +101,7 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
                 onDoubleClick={() => void playTracks(tracks, i)}
                 title={unavailable ? t.unavailableReason ?? "Unavailable" : undefined}
                 className={cn(
-                  "group grid items-center gap-3 px-4 text-sm hover:bg-accent/60",
+                  "group grid items-center text-sm hover:bg-accent/60",
                   cols,
                   isCurrent && "bg-primary/10",
                   unavailable && "[&_.dim]:opacity-50",
@@ -128,11 +132,11 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
                     <div className="dim truncate text-xs text-muted-foreground">{t.artist || "Unknown artist"}</div>
                   </div>
                 </div>
-                {showAlbum && <span className="dim truncate text-muted-foreground">{t.album}</span>}
-                <span className="dim">
+                {showAlbum && <span className="dim hidden truncate text-muted-foreground @3xl:block">{t.album}</span>}
+                <span className="dim hidden @xl:block">
                   <SourceBadge source={t.source} />
                 </span>
-                <span className="dim text-right text-xs tabular-nums text-muted-foreground">{formatDuration(t.durationMs)}</span>
+                <span className="dim hidden text-right text-xs tabular-nums @sm:block text-muted-foreground">{formatDuration(t.durationMs)}</span>
                 <TrackMenu track={t} extra={extraMenu?.(t, i)}>
                   <Button variant="ghost" size="icon" className="size-8 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Track actions">
                     <MoreHorizontal className="size-4" />

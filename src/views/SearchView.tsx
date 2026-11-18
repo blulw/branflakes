@@ -40,7 +40,7 @@ export function SearchView() {
         {source !== "library" && <SourceBadge source={source} compact />}
         {title}
         <span className="text-xs text-muted-foreground">{tracks.length}</span>
-        {note && <span className="ml-auto text-xs text-muted-foreground">{note}</span>}
+        {note && <span className="ml-auto hidden text-xs text-muted-foreground @2xl:inline">{note}</span>}
       </div>
       <div className="flex h-80 min-h-0 flex-col">
         <TrackTable tracks={tracks} showAlbum={false} empty="No results" />
@@ -51,7 +51,7 @@ export function SearchView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="px-6 pb-3 pt-5">
+      <header className="px-4 pb-3 pt-5 @xl:px-6">
         <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
         <form
           className="mt-3 flex max-w-xl gap-2"
@@ -73,7 +73,7 @@ export function SearchView() {
         </p>
       </header>
       {results && (
-        <div className="grid gap-4 px-6 pb-6">
+        <div className="grid gap-4 px-4 pb-6 @xl:px-6">
           {results.errors.map((e) => (
             <p key={e.provider} className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {e.provider}: {e.message}
