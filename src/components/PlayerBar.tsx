@@ -41,19 +41,11 @@ export function PlayerBar() {
   const st = usePlayer();
   const track = st.currentTrack();
   const c = st.controls();
-  const [scrub, setScrub] = useState<number | null>(null);
-  const duration = st.durationMs ?? track?.durationMs ?? null;
-  const position = scrub ?? st.positionMs;
   const lyricsOpen = useUi((s) => s.lyricsOpen);
   const toggleLyrics = useUi((s) => s.toggleLyrics);
   const setFullscreen = useUi((s) => s.setFullscreen);
 
-  useEffect(() => {
-    setScrub(null);
-  }, [track?.id]);
-
   const VolumeIcon = st.volume === 0 ? VolumeX : st.volume < 0.5 ? Volume1 : Volume2;
-  const RepeatIcon = st.repeatMode === "one" ? Repeat1 : Repeat;
 
   return (
     <footer className="@container/player h-24 shrink-0 border-t bg-sidebar">
@@ -98,73 +90,7 @@ export function PlayerBar() {
         )}
       </div>
 
-      {/* Transport */}
-      <div className="flex min-w-0 flex-col items-center gap-1">
-        <div className="flex items-center gap-1">
-          <Ctl state={{ enabled: st.queue.length > 1 }} label={st.shuffle ? "Shuffle on (click to turn off)" : "Shuffle upcoming"} onClick={() => void st.toggleShuffle()} className={cn(st.shuffle && "text-primary")}>
-            <Shuffle className="size-4" />
-          </Ctl>
-          <Ctl state={c.previous} label="Previous" onClick={() => void st.previous()}>
-            <SkipBack className="size-4 fill-current" />
-          </Ctl>
-          <Ctl
-            state={c.playPause}
-            label={st.status === "playing" ? "Pause" : "Play"}
-            onClick={() => void st.togglePlay()}
-            className="size-10 @xl/player:size-11 bg-foreground text-background hover:bg-foreground/90 hover:text-background disabled:bg-muted disabled:text-muted-foreground"
-          >
-            {st.status === "loading" ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : st.status === "playing" ? (
-              <Pause className="size-5 fill-current" />
-            ) : (
-              <Play className="size-5 translate-x-px fill-current" />
-            )}
-          </Ctl>
-          <Ctl state={c.next} label="Next" onClick={() => void st.next(true)}>
-            <SkipForward className="size-4 fill-current" />
-          </Ctl>
-          <Ctl state={{ enabled: st.queue.length > 0 }} label={`Repeat: ${st.repeatMode}`} onClick={st.cycleRepeat} className={cn(st.repeatMode !== "off" && "text-primary")}>
-            <RepeatIcon className="size-4" />
-          </Ctl>
-        </div>
-        <div className="flex w-full max-w-xl items-center gap-2 text-[11px] tabular-nums text-muted-foreground">
-          <span className="w-9 shrink-0 text-right">{c.showPosition ? formatDuration(position) : ""}</span>
-          {c.seek.enabled ? (
-            <Slider
-              aria-label="Seek"
-              min={0}
-              max={duration ?? 1}
-              step={1000}
-              value={[Math.min(position, duration ?? 0)]}
-              onValueChange={([v]) => setScrub(v)}
-              onValueCommit={([v]) => {
-                setScrub(null);
-                void st.seek(v);
-              }}
-              className="flex-1"
-            />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="h-1 flex-1 rounded-full bg-muted" aria-label={c.seek.reason}>
-                  {c.showPosition && duration ? (
-                    <div className="h-full rounded-full bg-muted-foreground/50" style={{ width: `${Math.min(100, (position / duration) * 100)}%` }} />
-                  ) : null}
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>{c.seek.reason}</TooltipContent>
-            </Tooltip>
-          )}
-          <span className="w-9 shrink-0">{c.showDuration ? formatDuration(duration) : ""}</span>
-        </div>
-        {(c.blocker || st.error) && (
-          <div className="flex items-center gap-1 text-[11px] text-destructive">
-            <AlertCircle className="size-3" />
-            <span className="truncate">{c.blocker ?? st.error}</span>
-          </div>
-        )}
-      </div>
+      <Transport />
 
       {/* Device + volume */}
       <div className="flex items-center justify-end gap-1 @2xl/player:gap-2">
@@ -214,5 +140,90 @@ export function PlayerBar() {
       </div>
      </div>
     </footer>
+  );
+}
+
+/** Play controls and progress bar; `large` for the full-screen view. */
+export function Transport({ large = false }: { large?: boolean }) {
+  const st = usePlayer();
+  const track = st.currentTrack();
+  const c = st.controls();
+  const [scrub, setScrub] = useState<number | null>(null);
+  const duration = st.durationMs ?? track?.durationMs ?? null;
+  const position = scrub ?? st.positionMs;
+  const RepeatIcon = st.repeatMode === "one" ? Repeat1 : Repeat;
+  const btn = large ? "size-10 @xl/player:size-10 [&_svg]:size-5" : undefined;
+
+  useEffect(() => {
+    setScrub(null);
+  }, [track?.id]);
+
+  return (
+    <div className={cn("flex min-w-0 flex-col items-center", large ? "w-full gap-3" : "gap-1")}>
+      <div className={cn("flex items-center", large ? "gap-3" : "gap-1")}>
+        <Ctl state={{ enabled: st.queue.length > 1 }} label={st.shuffle ? "Shuffle on (click to turn off)" : "Shuffle upcoming"} onClick={() => void st.toggleShuffle()} className={cn(btn, st.shuffle && "text-primary")}>
+          <Shuffle className="size-4" />
+        </Ctl>
+        <Ctl state={c.previous} label="Previous" onClick={() => void st.previous()} className={btn}>
+          <SkipBack className="size-4 fill-current" />
+        </Ctl>
+        <Ctl
+          state={c.playPause}
+          label={st.status === "playing" ? "Pause" : "Play"}
+          onClick={() => void st.togglePlay()}
+          className={cn("size-10 @xl/player:size-11", large && "size-14 @xl/player:size-14", "bg-foreground text-background hover:bg-foreground/90 hover:text-background disabled:bg-muted disabled:text-muted-foreground")}
+        >
+          {st.status === "loading" ? (
+            <Loader2 className={cn("animate-spin", large ? "size-6" : "size-5")} />
+          ) : st.status === "playing" ? (
+            <Pause className={cn("fill-current", large ? "size-6" : "size-5")} />
+          ) : (
+            <Play className={cn("translate-x-px fill-current", large ? "size-6" : "size-5")} />
+          )}
+        </Ctl>
+        <Ctl state={c.next} label="Next" onClick={() => void st.next(true)} className={btn}>
+          <SkipForward className="size-4 fill-current" />
+        </Ctl>
+        <Ctl state={{ enabled: st.queue.length > 0 }} label={`Repeat: ${st.repeatMode}`} onClick={st.cycleRepeat} className={cn(btn, st.repeatMode !== "off" && "text-primary")}>
+          <RepeatIcon className="size-4" />
+        </Ctl>
+      </div>
+      <div className={cn("flex w-full max-w-xl items-center gap-2 tabular-nums text-muted-foreground", large ? "text-xs" : "text-[11px]")}>
+        <span className="w-9 shrink-0 text-right">{c.showPosition ? formatDuration(position) : ""}</span>
+        {c.seek.enabled ? (
+          <Slider
+            aria-label="Seek"
+            min={0}
+            max={duration ?? 1}
+            step={1000}
+            value={[Math.min(position, duration ?? 0)]}
+            onValueChange={([v]) => setScrub(v)}
+            onValueCommit={([v]) => {
+              setScrub(null);
+              void st.seek(v);
+            }}
+            className="flex-1"
+          />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="h-1 flex-1 rounded-full bg-muted" aria-label={c.seek.reason}>
+                {c.showPosition && duration ? (
+                  <div className="h-full rounded-full bg-muted-foreground/50" style={{ width: `${Math.min(100, (position / duration) * 100)}%` }} />
+                ) : null}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{c.seek.reason}</TooltipContent>
+          </Tooltip>
+        )}
+        <span className="w-9 shrink-0">{c.showDuration ? formatDuration(duration) : ""}</span>
+      </div>
+      {(c.blocker || st.error) && (
+        <div className="flex items-center gap-1 text-[11px] text-destructive">
+          <AlertCircle className="size-3" />
+          <span className="truncate">{c.blocker ?? st.error}</span>
+        </div>
+      )}
+    </div>
   );
 }
