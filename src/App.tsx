@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { PlayerBar } from "@/components/PlayerBar";
+import { BranDropZone } from "@/components/BranDropZone";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlayer } from "@/playback/store";
@@ -104,6 +105,7 @@ export default function App() {
         <PlayerBar />
       </div>
       <TrackEditorDialog />
+      <BranDropZone />
       <Toaster position="bottom-right" offset={{ bottom: 110 }} />
     </TooltipProvider>
   );

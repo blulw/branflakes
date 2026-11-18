@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp } from "lucide-react";
+import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
 import { PlaylistCover } from "./PlaylistCover";
 import { PlaylistKindIcon } from "./PlaylistKind";
 import { api, toApiError } from "@/lib/api";
+import { chooseAndImportBran } from "@/lib/bran";
 import { PLAYLIST_SORT_LABEL, sortPlaylists, type PlaylistSort } from "@/lib/playlistSort";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/logo.png";
@@ -129,6 +130,9 @@ export function Sidebar() {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button variant="ghost" size="icon" className="size-6" aria-label="Open shared playlist" title="Open a shared playlist (.bran)" onClick={() => void chooseAndImportBran()}>
+          <FileDown className="size-4" />
+        </Button>
         <Button variant="ghost" size="icon" className="size-6" aria-label="New playlist" onClick={() => setCreating((c) => !c)}>
           <Plus className="size-4" />
         </Button>

@@ -14,6 +14,8 @@ pub struct AppPaths {
     pub db_path: PathBuf,
     pub artwork_dir: PathBuf,
     pub backup_dir: PathBuf,
+    /// Local audio that arrived in shared `.bran` playlists (content-addressed).
+    pub shared_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -22,6 +24,7 @@ impl AppPaths {
             db_path: data_dir.join("library.sqlite3"),
             artwork_dir: data_dir.join("artwork"),
             backup_dir: data_dir.join("backups"),
+            shared_dir: data_dir.join("shared"),
             data_dir,
         }
     }
