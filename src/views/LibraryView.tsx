@@ -43,7 +43,7 @@ export function LibraryView({ artist, album, title }: { artist?: string; album?:
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-3 px-6 pb-3 pt-5">
+      <header className="flex flex-wrap items-center gap-3 px-4 pb-3 pt-5 @xl:px-6">
         <div className="mr-auto min-w-0">
           {(artist || album) && (
             <button className="text-xs text-muted-foreground hover:underline" onClick={() => navigate({ name: album ? "albums" : "artists" })}>
@@ -57,8 +57,8 @@ export function LibraryView({ artist, album, title }: { artist?: string; album?:
           <Play className="size-4 fill-current" /> Play
         </Button>
       </header>
-      <div className="flex flex-wrap items-center gap-2 px-6 pb-3">
-        <div className="relative w-72">
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-3 @xl:px-6">
+        <div className="relative w-full @xl:w-72">
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter by title, artist, album, genre" className="h-8 pl-8" aria-label="Filter library" />
         </div>

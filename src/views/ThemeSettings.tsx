@@ -122,7 +122,7 @@ export function ThemeSettings() {
 
       {id === CUSTOM_THEME_ID && <CustomEditor />}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-3">
         {showCustom && <ThemeTile name="Custom" words={CUSTOM_WORDS} t={resolveCustom(custom, image)} active={id === CUSTOM_THEME_ID} onSelect={() => setTheme(CUSTOM_THEME_ID)} />}
         {shown.map(({ p, t }) => (
           <ThemeTile key={p.id} name={p.name} words={p.words} t={t} active={id === p.id} onSelect={() => setTheme(p.id)} />
@@ -269,7 +269,7 @@ function CustomEditor() {
       </CardHeader>
       <CardContent className="space-y-6">
         <Section title="Colours">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 @xl:grid-cols-3">
             <ColorField label="Background" value={c.background} onChange={set("background")} />
             <ColorField label="Surfaces" value={c.surface} onChange={set("surface")} />
             <ColorField label="Primary" value={c.primary} onChange={set("primary")} />
@@ -279,7 +279,7 @@ function CustomEditor() {
         </Section>
 
         <Section title="Transparency & glow">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 @xl:grid-cols-2">
             <SliderField label="Surface opacity" value={c.opacity} min={0.15} max={1} step={0.05} format={pct} onChange={set("opacity")} />
             <SliderField label="Frosted blur" value={c.blur} min={0} max={40} step={1} format={(v) => `${v}px`} onChange={set("blur")} disabled={c.opacity >= 1 && !image} />
             <SliderField label="Glow" value={c.glow} min={0} max={1} step={0.05} format={(v) => (v ? pct(v) : "Off")} onChange={set("glow")} />
@@ -291,7 +291,7 @@ function CustomEditor() {
         </Section>
 
         <Section title="Background">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 @xl:grid-cols-3">
             <ChoiceField
               label="Gradient"
               value={c.gradient}
@@ -324,7 +324,7 @@ function CustomEditor() {
             </div>
           </div>
           {image && (
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 @xl:grid-cols-3">
               <ChoiceField
                 label="Image fit"
                 value={c.imageFit}
@@ -342,7 +342,7 @@ function CustomEditor() {
         </Section>
 
         <Section title="Shape & type">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 @xl:grid-cols-2">
             <SliderField label="Corner roundness" value={c.radius} min={0} max={1.4} step={0.05} format={(v) => `${Math.round(v * 16)}px`} onChange={set("radius")} />
             <ChoiceField label="Font" value={c.font} options={(Object.keys(FONTS) as ThemeFont[]).map((f) => [f, FONTS[f].label])} onChange={set("font")} />
           </div>

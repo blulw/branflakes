@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 import { toApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import type { SyncEvent } from "@/lib/types";
@@ -19,6 +20,8 @@ import { SearchView } from "@/views/SearchView";
 import { SettingsView } from "@/views/SettingsView";
 import { TrackEditorDialog } from "@/views/TrackEditorDialog";
 import { LyricsPanel } from "@/components/LyricsPanel";
+import { FullscreenView } from "@/components/FullscreenView";
+import { computeLayout, useWindowWidth } from "@/lib/layout";
 
 function CurrentView() {
   const view = useUi((s) => s.view);
@@ -46,6 +49,8 @@ function CurrentView() {
 
 export default function App() {
   const lyricsOpen = useUi((s) => s.lyricsOpen);
+  const fullscreen = useUi((s) => s.fullscreen);
+  const layout = computeLayout(useWindowWidth(), lyricsOpen);
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
@@ -94,16 +99,19 @@ export default function App() {
   }
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full flex-col">
+      {/* Hidden (not unmounted) under the full-screen view so the theme background shows through it. */}
+      <div className={cn("flex h-full flex-col", fullscreen && "invisible")} aria-hidden={fullscreen || undefined}>
         <div className="flex min-h-0 flex-1">
-          <Sidebar />
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <Sidebar width={layout.sidebarWidth} labels={layout.sidebarLabels} titles={layout.playlistTitles} />
+          {/* Kept mounted (just hidden) so the view keeps its state when lyrics take over. */}
+          <main className={layout.showMain ? "@container flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
             <CurrentView />
           </main>
-          {lyricsOpen && <LyricsPanel />}
+          {lyricsOpen && <LyricsPanel docked={layout.lyricsDocked} />}
         </div>
         <PlayerBar />
       </div>
+      {fullscreen && <FullscreenView />}
       <TrackEditorDialog />
       <BranDropZone />
       <Toaster position="bottom-right" offset={{ bottom: 110 }} />

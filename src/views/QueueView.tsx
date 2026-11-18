@@ -10,7 +10,7 @@ export function QueueView() {
   const { queue, currentIndex, playAt, removeAt, move, clearQueue } = usePlayer();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-end justify-between px-6 pb-3 pt-5">
+      <header className="flex items-end justify-between gap-3 px-4 pb-3 pt-5 @xl:px-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Queue</h1>
           <p className="text-xs text-muted-foreground">
@@ -21,7 +21,7 @@ export function QueueView() {
           Clear
         </Button>
       </header>
-      <ol className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      <ol className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 @xl:px-4">
         {queue.map((t, i) => (
           <li
             key={`${t.id}-${i}`}
@@ -35,8 +35,10 @@ export function QueueView() {
               <div className={cn("truncate text-sm font-medium", i === currentIndex && "text-primary")}>{t.title}</div>
               <div className="truncate text-xs text-muted-foreground">{t.artist}</div>
             </div>
-            <SourceBadge source={t.source} />
-            <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">{formatDuration(t.durationMs)}</span>
+            <span className="hidden @xl:contents">
+              <SourceBadge source={t.source} />
+            </span>
+            <span className="hidden w-12 text-right @sm:block text-xs tabular-nums text-muted-foreground">{formatDuration(t.durationMs)}</span>
             <div className="flex opacity-0 group-hover:opacity-100">
               <Button variant="ghost" size="icon" className="size-7" disabled={i === 0} onClick={() => void move(i, i - 1)} aria-label="Move up">
                 <ArrowUp className="size-3.5" />

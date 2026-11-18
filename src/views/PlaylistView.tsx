@@ -235,11 +235,11 @@ export function PlaylistView({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-end gap-5 px-6 pb-4 pt-5">
+      <header className="flex items-end gap-3 px-4 pb-4 pt-5 @xl:gap-5 @xl:px-6">
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={detailsLocked}>
             <button className="group relative shrink-0 rounded-md focus-visible:outline-2" aria-label="Change playlist cover" title={detailsLocked ? lockedWhy : undefined}>
-              <PlaylistCover path={playlist.artworkPath} className="size-36 shadow-md" alt={`${playlist.name} cover`} />
+              <PlaylistCover path={playlist.artworkPath} className="size-20 shadow-md @xl:size-36" alt={`${playlist.name} cover`} />
               {!detailsLocked && (
                 <span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
                   <span className="flex flex-col items-center gap-1">
@@ -274,7 +274,7 @@ export function PlaylistView({ id }: { id: string }) {
               <Input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} onBlur={() => setRenaming(null)} className="h-11 text-2xl font-bold" aria-label="Playlist name" />
             </form>
           ) : (
-            <h1 className="truncate text-3xl font-bold tracking-tight" title={playlist.name}>
+            <h1 className="truncate text-2xl font-bold tracking-tight @xl:text-3xl" title={playlist.name}>
               {playlist.name}
             </h1>
           )}
