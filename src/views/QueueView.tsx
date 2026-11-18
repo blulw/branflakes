@@ -14,7 +14,7 @@ export function QueueView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Queue</h1>
           <p className="text-xs text-muted-foreground">
-            {queue.length} tracks · saved automatically and restored on restart. Only one source plays at a time; tracks from different providers play back to back, not gaplessly.
+            {queue.length} tracks
           </p>
         </div>
         <Button size="sm" variant="secondary" disabled={!queue.length} onClick={() => void clearQueue()}>

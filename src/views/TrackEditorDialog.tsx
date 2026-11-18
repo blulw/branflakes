@@ -160,7 +160,7 @@ function FileTagEditor({ track, onSaved }: { track: Track; onSaved: () => void }
       <p className="flex gap-2 rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
         <ShieldCheck className="size-4 shrink-0 text-primary" />
         {md.format.toUpperCase()} · {md.tagType ?? "no tag yet"}. The file is backed up first, only changed fields are written, other tags are preserved, and the result is read back and verified. On any mismatch the original is restored.
-        {isLoaded && " This track is playing — if Windows reports the file is in use, pause it and try again."}
+        {isLoaded && " This track is playing. If Windows reports the file is in use, pause it and try again."}
       </p>
       {backups.length > 0 && (
         <details className="text-xs text-muted-foreground">
@@ -169,7 +169,7 @@ function FileTagEditor({ track, onSaved }: { track: Track; onSaved: () => void }
             {backups.map((b) => (
               <li key={b.id} className="flex items-center gap-2">
                 <span className="flex-1 truncate" data-selectable>
-                  {new Date(b.createdAt).toLocaleString()} — {b.backupPath}
+                  {new Date(b.createdAt).toLocaleString()} · {b.backupPath}
                 </span>
                 <Button
                   size="sm"

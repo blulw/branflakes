@@ -233,7 +233,7 @@ function Accounts() {
             <Field id="sc-id" label="Client ID" value={v("soundcloudClientId", settings.soundcloudClientId)} onChange={(e) => setForm({ ...form, soundcloudClientId: e.target.value })} />
             <Field
               id="sc-secret"
-              label={`Client secret ${settings.soundcloudSecretSet ? "(stored — leave blank to keep)" : ""}`}
+              label={`Client secret ${settings.soundcloudSecretSet ? "(stored, leave blank to keep)" : ""}`}
               type="password"
               autoComplete="off"
               value={form.soundcloudClientSecret ?? ""}
@@ -283,7 +283,7 @@ function Accounts() {
             <Field id="lf-key" label="API key" value={v("lastfmApiKey", settings.lastfmApiKey)} onChange={(e) => setForm({ ...form, lastfmApiKey: e.target.value })} />
             <Field
               id="lf-secret"
-              label={`Shared secret ${settings.lastfmSecretSet ? "(stored — leave blank to keep)" : ""}`}
+              label={`Shared secret ${settings.lastfmSecretSet ? "(stored, leave blank to keep)" : ""}`}
               type="password"
               autoComplete="off"
               value={form.lastfmSharedSecret ?? ""}
@@ -374,7 +374,7 @@ function SoundCloudWebMode({ enabled, onToggle }: { enabled: boolean; onToggle: 
       <div className="flex items-start gap-3">
         <Switch id="sc-web" checked={enabled} onCheckedChange={onToggle} />
         <div className="space-y-1">
-          <Label htmlFor="sc-web">Web mode — play SoundCloud without an API app (unofficial)</Label>
+          <Label htmlFor="sc-web">Web mode: play SoundCloud without an API app (unofficial)</Label>
           <p className="text-xs text-muted-foreground">
             Uses the same internal API as the soundcloud.com website instead of the official API, so no Artist Pro plan is needed. It can stop working whenever
             SoundCloud changes its website, SoundCloud may rate-limit or block it, and it may be against SoundCloud's Terms of Use. Public tracks only; Go+ tracks
@@ -521,10 +521,7 @@ function CapabilityMatrix() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Playback capabilities (live)</CardTitle>
-        <CardDescription>
-          What each source can do right now, as declared by its adapter and current connection state. The player only enables controls marked ✓. Next/previous move through the unified app queue.
-        </CardDescription>
+        <CardTitle>Playback capabilities</CardTitle>
       </CardHeader>
       <CardContent>
         <table className="w-full text-sm">
@@ -568,9 +565,8 @@ function NormalizeVolume() {
       <div className="space-y-1">
         <Label htmlFor="normalize-volume">Consistent volume between songs</Label>
         <p className="text-xs text-muted-foreground">
-          Measures each song's average loudness (LUFS) the first time it plays and adjusts its level so loud and quiet songs sound about the same. The volume
-          slider still controls overall volume. Spotify songs use the same song from your local files when you have it (on any device); otherwise the
-          in-app player measures the song while it plays, adjusting a few seconds in and remembering the result once most of the song has played.
+          Measures each song's loudness (LUFS) the first time it plays and adjusts its level so loud and quiet songs sound about the same. Spotify songs use
+          your local copy's measurement when you have one.
         </p>
       </div>
     </div>
@@ -613,7 +609,7 @@ function General() {
         <LyricsSources />
         <div className="flex items-end gap-2">
           <Field id="port" label="OAuth loopback port" className="w-32" placeholder={String(settings.oauthPort)} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} />
-          <Button size="sm" variant="secondary" disabled={!port} onClick={() => void guard(() => api.updateSettings({ oauthPort: Number(port) }), "Saved — update the redirect URIs in your Spotify/SoundCloud apps").then(() => (setPort(""), refreshSettings()))}>
+          <Button size="sm" variant="secondary" disabled={!port} onClick={() => void guard(() => api.updateSettings({ oauthPort: Number(port) }), "Saved. Update the redirect URIs in your Spotify and SoundCloud apps.").then(() => (setPort(""), refreshSettings()))}>
             Save
           </Button>
         </div>

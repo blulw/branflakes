@@ -1,6 +1,6 @@
 [package]
 name = "branflakes"
-version = "0.6.4"
+version = "0.6.5"
 description = "branflakes"
 authors = ["branflakes"]
 edition = "2024"

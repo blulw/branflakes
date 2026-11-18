@@ -55,7 +55,7 @@ export function AddSongsDialog({ open, onOpenChange, playlistId, playlistName, e
           <div className="truncate text-sm font-medium">{t.title}</div>
           <div className="truncate text-xs text-muted-foreground">
             {t.artist}
-            {t.album ? ` — ${t.album}` : ""}
+            {t.album ? ` · ${t.album}` : ""}
           </div>
         </div>
         <SourceBadge source={t.source} compact />

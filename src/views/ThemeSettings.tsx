@@ -104,7 +104,7 @@ export function ThemeSettings() {
             <Palette className="size-5" /> Themes
           </CardTitle>
           <CardDescription>
-            {PRESETS.length + 1} themes. Pick one to apply it straight away. Choose <b>Custom</b> to set your own colours, transparency, glow, fonts and a background image.
+            {PRESETS.length + 1} themes. Choose <b>Custom</b> to set your own colours, transparency, glow, fonts and a background image.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-2">
@@ -265,7 +265,6 @@ function CustomEditor() {
     <Card>
       <CardHeader>
         <CardTitle>Custom theme</CardTitle>
-        <CardDescription>Changes apply as you make them and are saved on this computer.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <Section title="Colours">
