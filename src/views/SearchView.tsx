@@ -68,9 +68,6 @@ export function SearchView() {
             {busy ? <Loader2 className="size-4 animate-spin" /> : "Search"}
           </Button>
         </form>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Results from streaming services are not added to your library until you choose “Add to library”. They can be played, queued and added to playlists directly.
-        </p>
       </header>
       {results && (
         <div className="grid gap-4 px-4 pb-6 @xl:px-6">
