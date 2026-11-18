@@ -32,15 +32,25 @@ export interface Track {
 
 export interface LyricLine {
   timeMs: number;
-  /** Empty = an instrumental gap. */
+  /** When the singing of this line ends (a gap follows), when known. */
+  endMs?: number;
+  /** Empty = an instrumental gap (only in a non-Genius source's own lines). */
   text: string;
+  /** A Genius section header such as "[Chorus]". */
+  header?: boolean;
 }
 
-/** Lyrics for a track: Genius text and/or LRCLIB time-synced lines. */
+export type LyricsSource = "genius" | "lrclib" | "musixmatch" | "netease";
+
+/** Lyrics for a track: Genius's words, timed by LRCLIB / Musixmatch / NetEase when possible. */
 export interface Lyrics {
+  /** Timed lines; Genius's words whenever Genius has the song. */
   synced: LyricLine[] | null;
+  /** Where the timing came from. */
+  syncSource: LyricsSource | null;
   plain: string | null;
-  plainSource: "genius" | "lrclib" | null;
+  /** Whose words are shown ("genius" unless Genius has none). */
+  plainSource: LyricsSource | null;
   geniusUrl: string | null;
   instrumental: boolean;
 }
@@ -288,6 +298,8 @@ export interface AppSettings {
   spotifySyncIntervalMinutes: number;
   /** Scale in-app playback towards a common loudness. */
   normalizeVolume: boolean;
+  /** Also use Musixmatch and NetEase for lyrics timing. */
+  lyricsExtraSources: boolean;
   spotifyRedirectUri: string;
   soundcloudRedirectUri: string;
   dataDir: string;
@@ -305,6 +317,7 @@ export interface SettingsPatch {
   oauthPort?: number;
   spotifySyncIntervalMinutes?: number;
   normalizeVolume?: boolean;
+  lyricsExtraSources?: boolean;
 }
 
 export interface ImportReport {

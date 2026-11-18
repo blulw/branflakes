@@ -539,6 +539,8 @@ pub struct AppSettings {
     pub spotify_sync_interval_minutes: u64,
     /// Scale in-app playback towards a common loudness (default on).
     pub normalize_volume: bool,
+    /// Also use Musixmatch and NetEase for lyrics timing (default on).
+    pub lyrics_extra_sources: bool,
     pub spotify_redirect_uri: String,
     pub soundcloud_redirect_uri: String,
     pub data_dir: String,
@@ -560,6 +562,7 @@ pub fn settings_get(state: S<'_>) -> AppResult<AppSettings> {
         oauth_port: port,
         spotify_sync_interval_minutes: sync::interval(&conn).as_secs() / 60,
         normalize_volume: settings::get_bool(&conn, settings::NORMALIZE_VOLUME, true)?,
+        lyrics_extra_sources: settings::get_bool(&conn, settings::LYRICS_EXTRA_SOURCES, true)?,
         spotify_redirect_uri: oauth::redirect_uri(port, "spotify"),
         soundcloud_redirect_uri: oauth::redirect_uri(port, "soundcloud"),
         data_dir: state.paths.data_dir.to_string_lossy().into_owned(),
@@ -581,6 +584,7 @@ pub struct SettingsPatch {
     pub oauth_port: Option<u16>,
     pub spotify_sync_interval_minutes: Option<u64>,
     pub normalize_volume: Option<bool>,
+    pub lyrics_extra_sources: Option<bool>,
 }
 
 #[tauri::command]
@@ -604,6 +608,9 @@ pub fn settings_update(state: S<'_>, patch: SettingsPatch) -> AppResult<AppSetti
         }
         if let Some(b) = patch.normalize_volume {
             settings::set(&conn, settings::NORMALIZE_VOLUME, if b { "true" } else { "false" })?;
+        }
+        if let Some(b) = patch.lyrics_extra_sources {
+            settings::set(&conn, settings::LYRICS_EXTRA_SOURCES, if b { "true" } else { "false" })?;
         }
         if let Some(b) = patch.soundcloud_web_mode {
             settings::set(&conn, settings::SOUNDCLOUD_WEB_MODE, if b { "true" } else { "false" })?;
@@ -1277,22 +1284,22 @@ const SPOTIFY_CAPTURE_KEY: &str = "spotify:capture";
 
 // ================================================================ lyrics
 
-/// Lyrics for a track (Genius text, LRCLIB time-synced lines), cached per
-/// track. `refresh` skips the cache. `None` = nothing found.
+/// Lyrics for a track (Genius words; timing from LRCLIB, then Musixmatch and
+/// NetEase when enabled), cached per track. `refresh` skips the cache.
+/// `None` = nothing found.
 #[tauri::command]
 pub async fn lyrics_get(state: S<'_>, track_id: String, refresh: Option<bool>) -> AppResult<Option<crate::lyrics::Lyrics>> {
     let t = library::get_track(&state.conn(), &track_id)?;
-    let key = crate::lyrics::lookup_key(&t);
+    let extra = settings::get_bool(&state.conn(), settings::LYRICS_EXTRA_SOURCES, true)?;
+    let key = crate::lyrics::lookup_key(&t, extra);
     if !refresh.unwrap_or(false) {
         let hit = crate::lyrics::cached(&state.conn(), &t.id, &key)?;
         if let Some(hit) = hit {
             return Ok(hit);
         }
     }
-    let fetched = state.lyrics.fetch(&t).await?;
-    if fetched.complete {
-        crate::lyrics::store(&state.conn(), &t.id, &key, fetched.lyrics.as_ref())?;
-    }
+    let fetched = state.lyrics.fetch(&t, extra).await?;
+    crate::lyrics::store(&state.conn(), &t.id, &key, fetched.lyrics.as_ref(), fetched.complete)?;
     Ok(fetched.lyrics)
 }
 

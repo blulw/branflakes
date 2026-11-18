@@ -29,7 +29,7 @@ It does **not** embed, automate, or talk over IPC to any other music application
 | SoundCloud | OAuth 2.1 + PKCE, import of likes and playlists, search, and in-app AAC HLS streaming with the required attribution. Optional *web mode* (off by default) works without an official API app; see the note below. |
 | Last.fm | Desktop auth, Now Playing and scrobbling for **local, Spotify and SoundCloud tracks** plus SoundCloud (Spotify can be turned off separately). The cache survives restarts and is retried in batches of 50. |
 | Find alternative | Unavailable Spotify tracks in a playlist get a **Find alternative** button. It searches your local files first, then SoundCloud, for the same song (title and artist), and adds your pick right after the original, which stays. |
-| Lyrics | The microphone button in the player bar opens a lyrics panel for the playing song. Lyrics are looked up by title and artist on **Genius**, and time-synced lines come from **LRCLIB** when it has them: the current line is highlighted and follows the song, and clicking a line seeks there (when the source can seek). Genius itself has no timestamps, so songs LRCLIB doesn't know show Genius's text unsynced. No account or API key is needed. |
+| Lyrics | The microphone button in the player bar opens a lyrics panel for the playing song. The words always come from **Genius**. Timing comes from **LRCLIB**, and for songs LRCLIB doesn't have, from **Musixmatch** and **NetEase Cloud Music** (Settings → General, on by default). The timing is matched word by word onto Genius's lines, so the current line is highlighted and followed, and clicking a line seeks there (when the source can seek). When no timing matches, Genius's text is shown unsynced. No account or API key is needed. |
 | Playback | Each provider declares its capabilities, and the UI disables any control the active source can't perform, with a tooltip saying why. One source owns playback at a time. Previous / Play-Pause / Next buttons appear in the Windows taskbar hover thumbnail. |
 
 ## Requirements
@@ -78,7 +78,7 @@ Provider adapter tests run against a local mock HTTP server (`mockito`), so they
 - **Library database:** `%APPDATA%\com.unifiedmusic.desktop\library.sqlite3`
 - **Artwork cache:** `…\artwork\`. **Tag-edit backups:** `…\backups\` (never deleted automatically).
 - **Secrets** (OAuth tokens, the SoundCloud client secret, the Last.fm shared secret and session key) are stored as generic credentials in **Windows Credential Manager** under `com.unifiedmusic.desktop`. They are never written to SQLite or logs.
-- **Lyrics lookups** send only the song title, artist, album and length to Genius and LRCLIB. Results are cached per track in SQLite.
+- **Lyrics lookups** send only the song title, artist, album and length to Genius, LRCLIB and (when enabled) Musixmatch and NetEase. Results are cached per track in SQLite.
 - The asset protocol (used to play local files and show cached artwork) only serves your library folders and the artwork cache.
 
 ## Documentation

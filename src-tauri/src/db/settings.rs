@@ -21,6 +21,8 @@ pub const SPOTIFY_USER_ID: &str = "spotify.user_id";
 pub const SPOTIFY_SYNC_INTERVAL: &str = "spotify.sync_interval_secs";
 /// Normalize in-app playback loudness across tracks (default on).
 pub const NORMALIZE_VOLUME: &str = "playback.normalize_volume";
+/// Also use Musixmatch and NetEase for lyrics timing (default on).
+pub const LYRICS_EXTRA_SOURCES: &str = "lyrics.extra_sources";
 
 pub fn get(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     Ok(conn

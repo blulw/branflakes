@@ -3,8 +3,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { AlertCircle, Loader2, Music2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, toApiError } from "@/lib/api";
-import { activeLineIndex, isSectionHeader } from "@/lib/lyrics";
-import type { Lyrics } from "@/lib/types";
+import { activeLine, isSectionHeader } from "@/lib/lyrics";
+import type { Lyrics, LyricsSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
@@ -14,11 +14,17 @@ type Load = { status: "idle" } | { status: "loading" } | { status: "error"; mess
 /** After the user scrolls, stop following the song for this long. */
 const MANUAL_SCROLL_PAUSE_MS = 4000;
 
+const SOURCE_NAME: Record<LyricsSource, string> = {
+  genius: "Genius",
+  lrclib: "LRCLIB",
+  musixmatch: "Musixmatch",
+  netease: "NetEase Cloud Music",
+};
+
 export function LyricsPanel() {
   const track = usePlayer((s) => s.currentTrack());
   const toggleLyrics = useUi((s) => s.toggleLyrics);
   const [load, setLoad] = useState<Load>({ status: "idle" });
-  const [mode, setMode] = useState<"synced" | "text">("synced");
   const [reload, setReload] = useState(0);
   const trackId = track?.id ?? null;
   const refreshFor = useRef<string | null>(null);
@@ -47,9 +53,8 @@ export function LyricsPanel() {
   }, [trackId, reload]);
 
   const lyrics = load.status === "done" ? load.lyrics : null;
-  const hasSynced = !!lyrics?.synced?.length;
-  const hasText = !!lyrics?.plain;
-  const showSynced = hasSynced && (mode === "synced" || !hasText);
+  // Synced lines are Genius's words whenever Genius has the song.
+  const showSynced = !!lyrics?.synced?.length;
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-l bg-sidebar xl:w-96" aria-label="Lyrics">
@@ -79,24 +84,6 @@ export function LyricsPanel() {
           <X className="size-4" />
         </Button>
       </header>
-
-      {hasSynced && hasText && (
-        <div className="flex gap-1 border-b px-4 py-2" role="tablist">
-          {(["synced", "text"] as const).map((m) => (
-            <Button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              variant={mode === m ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => setMode(m)}
-            >
-              {m === "synced" ? "Synced" : lyrics?.plainSource === "genius" ? "Genius" : "Full text"}
-            </Button>
-          ))}
-        </div>
-      )}
 
       <div className="min-h-0 flex-1">
         {!track ? (
@@ -130,15 +117,20 @@ export function LyricsPanel() {
         )}
       </div>
 
-      {lyrics && (lyrics.geniusUrl || hasSynced || lyrics.plainSource) && (
+      {lyrics && (lyrics.geniusUrl || lyrics.plainSource) && (
         <footer className="space-y-0.5 border-t px-4 py-2 text-[11px] text-muted-foreground">
-          {lyrics.geniusUrl && (
+          {lyrics.plainSource === "genius" && lyrics.geniusUrl ? (
             <button className="underline-offset-2 hover:underline" onClick={() => void openUrl(lyrics.geniusUrl!)}>
-              {lyrics.plainSource === "genius" ? "Lyrics from Genius" : "View on Genius"}
+              Lyrics from Genius
             </button>
-          )}
-          {(showSynced || (lyrics.plainSource === "lrclib" && !lyrics.geniusUrl)) && (
-            <p>{showSynced ? "Timing from LRCLIB" : "Lyrics from LRCLIB"}</p>
+          ) : lyrics.plainSource ? (
+            <p>Lyrics from {SOURCE_NAME[lyrics.plainSource]}</p>
+          ) : null}
+          {showSynced && lyrics.syncSource && lyrics.syncSource !== lyrics.plainSource && <p>Timing from {SOURCE_NAME[lyrics.syncSource]}</p>}
+          {lyrics.plainSource !== "genius" && lyrics.geniusUrl && (
+            <button className="block underline-offset-2 hover:underline" onClick={() => void openUrl(lyrics.geniusUrl!)}>
+              View on Genius
+            </button>
           )}
         </footer>
       )}
@@ -147,7 +139,11 @@ export function LyricsPanel() {
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{<div>{children}</div>}</div>;
+  return (
+    <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">
+      <div>{children}</div>
+    </div>
+  );
 }
 
 function PlainLyrics({ text }: { text: string }) {
@@ -176,7 +172,7 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
   const loaded = usePlayer((s) => s.loadedTrackId === trackId);
   const canSeek = usePlayer((s) => s.loadedTrackId === trackId && s.controls().seek.enabled);
   const seek = usePlayer((s) => s.seek);
-  const active = loaded ? activeLineIndex(lines, positionMs) : -1;
+  const { index: active, singing } = loaded ? activeLine(lines, positionMs) : { index: -1, singing: false };
   const containerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<(HTMLElement | null)[]>([]);
   const manualUntil = useRef(0);
@@ -193,6 +189,9 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
   const userScrolled = () => {
     manualUntil.current = Date.now() + MANUAL_SCROLL_PAUSE_MS;
   };
+  const setRef = (i: number) => (el: HTMLElement | null) => {
+    lineRefs.current[i] = el;
+  };
 
   return (
     <div
@@ -203,13 +202,19 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
       onKeyDown={userScrolled}
     >
       {lines.map((line, i) => {
+        if (line.header) {
+          return (
+            <p key={i} ref={setRef(i)} className={cn("pb-1 text-xs font-medium text-muted-foreground", i > 0 && "pt-5")}>
+              {line.text}
+            </p>
+          );
+        }
         const Tag = canSeek ? "button" : "p";
+        const current = i === active && singing;
         return (
           <Tag
             key={i}
-            ref={(el: HTMLElement | null) => {
-              lineRefs.current[i] = el;
-            }}
+            ref={setRef(i)}
             onClick={
               canSeek
                 ? () => {
@@ -218,10 +223,10 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
                   }
                 : undefined
             }
-            aria-current={i === active ? "true" : undefined}
+            aria-current={current ? "true" : undefined}
             className={cn(
               "block w-full py-1.5 text-left text-lg font-semibold leading-snug transition-colors duration-300",
-              i === active ? "text-foreground" : i < active ? "text-muted-foreground/60" : "text-muted-foreground",
+              current ? "text-foreground" : i <= active ? "text-muted-foreground/60" : "text-muted-foreground",
               canSeek && "cursor-pointer hover:text-foreground/80",
             )}
           >
