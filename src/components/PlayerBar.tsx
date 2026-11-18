@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AlertCircle, MicVocal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, Loader2 } from "lucide-react";
+import { AlertCircle, Maximize2, MicVocal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Artwork } from "./Artwork";
 import { SourceBadge } from "./SourceBadge";
 import { DevicePicker } from "./DevicePicker";
@@ -46,6 +46,7 @@ export function PlayerBar() {
   const position = scrub ?? st.positionMs;
   const lyricsOpen = useUi((s) => s.lyricsOpen);
   const toggleLyrics = useUi((s) => s.toggleLyrics);
+  const setFullscreen = useUi((s) => s.setFullscreen);
 
   useEffect(() => {
     setScrub(null);
@@ -181,6 +182,14 @@ export function PlayerBar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{lyricsOpen ? "Hide lyrics" : "Lyrics"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8" aria-label="Full screen" onClick={() => setFullscreen(true)}>
+              <Maximize2 className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Full screen</TooltipContent>
         </Tooltip>
         {track?.source === "spotify" && c.deviceSelection.enabled && <DevicePicker />}
         {c.volume.enabled ? (

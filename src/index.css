@@ -25,6 +25,9 @@
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.78 0.14 165 / 60%);
   --sidebar: oklch(0.13 0.006 270);
+  /* Lyrics scrollbar: derived from the theme's foreground so it follows the theme. */
+  --scrollbar-thumb: color-mix(in oklch, var(--foreground) 18%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklch, var(--foreground) 35%, transparent);
 
   /* Source identity colours (used only for the small source badges). */
   --source-local: oklch(0.8 0.12 85);
@@ -77,4 +80,34 @@
   input, textarea, [data-selectable] {
     user-select: text;
   }
+}
+
+/* Scrollbars are hidden everywhere (scrolling still works)… */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+/* …except lyrics, which get a slim, minimal one. */
+.lyrics-scroll {
+  scrollbar-width: auto;
+}
+.lyrics-scroll::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.lyrics-scroll::-webkit-scrollbar-track,
+.lyrics-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.lyrics-scroll::-webkit-scrollbar-button {
+  display: none;
+}
+.lyrics-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
+.lyrics-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }

@@ -19,7 +19,6 @@ import { PlaylistKindIcon } from "./PlaylistKind";
 import { api, toApiError } from "@/lib/api";
 import { PLAYLIST_SORT_LABEL, sortPlaylists, type PlaylistSort } from "@/lib/playlistSort";
 import { cn } from "@/lib/utils";
-import type { SidebarMode } from "@/lib/layout";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FitText } from "./FitText";
 import logo from "@/assets/logo.png";
@@ -45,9 +44,12 @@ function loadSort(): PlaylistSort {
   return "recent";
 }
 
-export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; width?: number }) {
-  const rail = mode === "rail";
-  const labels = mode === "full";
+/**
+ * The sidebar's width follows the window smoothly. Icons and covers stay put
+ * (they line up on the same centre line at every width); text just goes away
+ * when there's no room: button labels first, then playlist titles.
+ */
+export function Sidebar({ width = 240, labels = true, titles = true }: { width?: number; labels?: boolean; titles?: boolean }) {
   const { view, navigate, playlists, refreshPlaylists } = useUi();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -96,10 +98,10 @@ export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; wi
     }
   };
 
+  // px-3 inside p-3 puts 16px icons on the centre line of the narrowest (64px) sidebar.
   const item = (active: boolean) =>
     cn(
-      "flex w-full items-center gap-3 rounded-md py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-      labels ? "px-3" : "justify-center px-0",
+      "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
       active && "bg-accent text-foreground",
     );
 
@@ -131,10 +133,10 @@ export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; wi
   );
 
   return (
-    <nav className={cn("flex shrink-0 flex-col gap-1 border-r bg-sidebar", rail ? "p-2" : "p-3")} style={{ width }} aria-label="Main" data-mode={mode}>
-      <div className={cn("flex items-center gap-2 pb-3 pt-1 text-sm font-semibold tracking-tight", rail ? "justify-center" : "px-3")}>
-        <img src={logo} alt={rail ? "branflakes" : ""} className="size-6 shrink-0 rounded-md object-cover" />
-        {!rail && <FitText>branflakes</FitText>}
+    <nav className="flex shrink-0 flex-col gap-1 overflow-hidden border-r bg-sidebar p-3" style={{ width }} aria-label="Main">
+      <div className="flex items-center gap-2 px-2 pb-3 pt-1 text-sm font-semibold tracking-tight">
+        <img src={logo} alt={labels ? "" : "branflakes"} className="size-6 shrink-0 rounded-md object-cover" />
+        {labels && <FitText>branflakes</FitText>}
       </div>
       {NAV.map(({ view: v, label, icon: Icon }) => (
         <button
@@ -149,15 +151,17 @@ export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; wi
         </button>
       ))}
 
-      <div className={cn("mt-4 flex items-center text-xs font-medium uppercase tracking-wide text-muted-foreground", rail ? "justify-center gap-0" : "gap-1 pl-3")}>
-        {!rail && <FitText className="mr-auto">Playlists</FitText>}
+      <div className="mt-4 flex items-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <FitText>
+          <span className="pl-3">Playlists</span>
+        </FitText>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label={`Sort playlists (${PLAYLIST_SORT_LABEL[sort]})`} title={`Sorted by: ${PLAYLIST_SORT_LABEL[sort]}`}>
+            <Button variant="ghost" size="icon" className="size-5 shrink-0" aria-label={`Sort playlists (${PLAYLIST_SORT_LABEL[sort]})`} title={`Sorted by: ${PLAYLIST_SORT_LABEL[sort]}`}>
               <ArrowDownUp className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align={rail ? "start" : "end"}>
+          <DropdownMenuContent align="start">
             <DropdownMenuLabel>Sort playlists by</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={sort} onValueChange={changeSort}>
               {(Object.keys(PLAYLIST_SORT_LABEL) as PlaylistSort[]).map((k) => (
@@ -168,7 +172,7 @@ export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; wi
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label="New playlist" title="New playlist" onClick={() => setCreating((c) => !c)}>
+        <Button variant="ghost" size="icon" className="size-5 shrink-0" aria-label="New playlist" title="New playlist" onClick={() => setCreating((c) => !c)}>
           <Plus className="size-4" />
         </Button>
       </div>
@@ -187,27 +191,24 @@ export function Sidebar({ mode = "full", width = 240 }: { mode?: SidebarMode; wi
         {sorted.map((p) => (
           <button
             key={p.id}
-            className={cn(item(view.name === "playlist" && view.id === p.id), "py-1.5", mode === "icons" && "justify-start px-2")}
+            // px-1: 32px covers share the 16px icons' centre line.
+            className={cn(item(view.name === "playlist" && view.id === p.id), "px-1 py-1.5")}
             onClick={() => navigate({ name: "playlist", id: p.id })}
             aria-label={p.name}
-            title={rail ? p.name : undefined}
+            title={titles ? undefined : p.name}
           >
-            {rail ? (
-              <span className="relative shrink-0">
-                <PlaylistCover path={p.artworkPath} className="size-8" />
-                <PlaylistKindIcon playlist={p} className="absolute -bottom-1 -right-1 rounded-full bg-sidebar p-px" />
-              </span>
-            ) : (
-              <>
-                <PlaylistCover path={p.artworkPath} className="size-8 shrink-0" />
-                <span className="min-w-0 flex-1 text-left">
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate">{p.name}</span>
-                    <PlaylistKindIcon playlist={p} />
-                  </span>
-                  <span className="block truncate text-[11px] text-muted-foreground">{p.trackCount} tracks</span>
+            <span className="relative shrink-0">
+              <PlaylistCover path={p.artworkPath} className="size-8" />
+              {!titles && <PlaylistKindIcon playlist={p} className="absolute -bottom-1 -right-1 rounded-full bg-sidebar p-px" />}
+            </span>
+            {titles && (
+              <span className="min-w-0 flex-1 text-left">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate">{p.name}</span>
+                  <PlaylistKindIcon playlist={p} />
                 </span>
-              </>
+                <span className="block truncate text-[11px] text-muted-foreground">{p.trackCount} tracks</span>
+              </span>
             )}
           </button>
         ))}

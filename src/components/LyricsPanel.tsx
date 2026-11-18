@@ -22,12 +22,10 @@ const SOURCE_NAME: Record<LyricsSource, string> = {
 };
 
 /** `docked`: fixed width beside the main view; otherwise it fills the window. */
-export function LyricsPanel({ docked = true }: { docked?: boolean }) {
-  const track = usePlayer((s) => s.currentTrack());
-  const toggleLyrics = useUi((s) => s.toggleLyrics);
+/** Loads lyrics for a track; `lookUpAgain` bypasses the cache. */
+export function useLyrics(trackId: string | null) {
   const [load, setLoad] = useState<Load>({ status: "idle" });
   const [reload, setReload] = useState(0);
-  const trackId = track?.id ?? null;
   const refreshFor = useRef<string | null>(null);
   const lookUpAgain = () => {
     refreshFor.current = trackId;
@@ -54,6 +52,13 @@ export function LyricsPanel({ docked = true }: { docked?: boolean }) {
   }, [trackId, reload]);
 
   const lyrics = load.status === "done" ? load.lyrics : null;
+  return { load, lyrics, lookUpAgain, showSynced: !!lyrics?.synced?.length };
+}
+
+export function LyricsPanel({ docked = true }: { docked?: boolean }) {
+  const track = usePlayer((s) => s.currentTrack());
+  const toggleLyrics = useUi((s) => s.toggleLyrics);
+  const { load, lyrics, lookUpAgain } = useLyrics(track?.id ?? null);
   // Synced lines are Genius's words whenever Genius has the song.
   const showSynced = !!lyrics?.synced?.length;
 
@@ -147,9 +152,9 @@ function Empty({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PlainLyrics({ text }: { text: string }) {
+export function PlainLyrics({ text }: { text: string }) {
   return (
-    <div className="h-full overflow-y-auto px-5 py-4" data-selectable>
+    <div className="lyrics-scroll h-full overflow-y-auto px-5 py-4" data-selectable>
       {text.split("\n").map((line, i) =>
         line.trim() === "" ? (
           <div key={i} className="h-4" />
@@ -167,7 +172,8 @@ function PlainLyrics({ text }: { text: string }) {
   );
 }
 
-function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) {
+/** `big`: the full-screen view's larger lines. */
+export function SyncedLyrics({ lyrics, trackId, big = false }: { lyrics: Lyrics; trackId: string; big?: boolean }) {
   const lines = lyrics.synced ?? [];
   const positionMs = usePlayer((s) => s.positionMs);
   const loaded = usePlayer((s) => s.loadedTrackId === trackId);
@@ -197,7 +203,7 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
   return (
     <div
       ref={containerRef}
-      className="relative h-full overflow-y-auto px-5 py-[40%]"
+      className={cn("lyrics-scroll relative h-full overflow-y-auto", big ? "px-8 py-[45vh]" : "px-5 py-[40%]")}
       onWheel={userScrolled}
       onTouchMove={userScrolled}
       onKeyDown={userScrolled}
@@ -205,7 +211,7 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
       {lines.map((line, i) => {
         if (line.header) {
           return (
-            <p key={i} ref={setRef(i)} className={cn("pb-1 text-xs font-medium text-muted-foreground", i > 0 && "pt-5")}>
+            <p key={i} ref={setRef(i)} className={cn("pb-1 font-medium text-muted-foreground", big ? "text-sm" : "text-xs", i > 0 && "pt-5")}>
               {line.text}
             </p>
           );
@@ -226,7 +232,8 @@ function SyncedLyrics({ lyrics, trackId }: { lyrics: Lyrics; trackId: string }) 
             }
             aria-current={current ? "true" : undefined}
             className={cn(
-              "block w-full py-1.5 text-left text-lg font-semibold leading-snug transition-colors duration-300",
+              "block w-full text-left font-semibold leading-snug transition-colors duration-300",
+              big ? "py-2.5 text-3xl" : "py-1.5 text-lg",
               current ? "text-foreground" : i <= active ? "text-muted-foreground/60" : "text-muted-foreground",
               canSeek && "cursor-pointer hover:text-foreground/80",
             )}

@@ -25,6 +25,9 @@ interface UiState {
   /** Lyrics panel beside the main view. */
   lyricsOpen: boolean;
   toggleLyrics(): void;
+  /** Full-screen "now playing" view (cover + lyrics over everything). */
+  fullscreen: boolean;
+  setFullscreen(on: boolean): void;
   setSyncing(id: string, on: boolean): void;
   navigate(v: View): void;
   bumpLibrary(): void;
@@ -51,6 +54,8 @@ export const useUi = create<UiState>((set) => ({
   editing: null,
   syncing: {},
   lyricsOpen: loadLyricsOpen(),
+  fullscreen: false,
+  setFullscreen: (fullscreen) => set({ fullscreen }),
   toggleLyrics: () =>
     set((s) => {
       const lyricsOpen = !s.lyricsOpen;
