@@ -71,6 +71,12 @@ export const api = {
     call<T.AddOutcome>("playlist_add_tracks", { id, trackIds, position: position ?? null }),
   removeFromPlaylist: (id: string, position: number) => call<void>("playlist_remove_item", { id, position }),
   movePlaylistItem: (id: string, from: number, to: number) => call<void>("playlist_move_item", { id, from, to }),
+  /** Save a playlist as a shareable `.bran` file (includes local audio). */
+  exportBran: (id: string, path: string) => call<T.BranExportReport>("playlist_export_bran", { id, path }),
+  inspectBran: (path: string) => call<T.BranSummary>("playlist_inspect_bran", { path }),
+  importBran: (path: string) => call<T.BranImportReport>("playlist_import_bran", { path }),
+  /** `.bran` files the app was opened with (double-click), not yet handled. */
+  takePendingBran: () => call<string[]>("bran_take_pending"),
 
   // find alternative
   alternativesSearch: (trackId: string, provider: "local" | "soundcloud") => call<T.AlternativesResult>("alternatives_search", { trackId, provider }),

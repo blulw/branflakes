@@ -4,7 +4,6 @@ import { Loader2, Minimize2, Music2 } from "lucide-react";
 import { Artwork } from "./Artwork";
 import { SyncedLyrics, useLyrics } from "./LyricsPanel";
 import { Button } from "@/components/ui/button";
-import { artworkSrc } from "@/lib/format";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 
@@ -49,7 +48,6 @@ export function FullscreenView() {
   const track = usePlayer((s) => s.currentTrack());
   const setFullscreen = useUi((s) => s.setFullscreen);
   const { load, lyrics, showSynced } = useLyrics(track?.id ?? null);
-  const art = artworkSrc(track?.artwork);
   useLockedMaximized();
 
   useEffect(() => {
@@ -79,10 +77,8 @@ export function FullscreenView() {
   );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-background" role="dialog" aria-modal aria-label="Now playing">
-      {/* The cover, blurred, behind a translucent pane. */}
-      {art && <img src={art} alt="" aria-hidden draggable={false} className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-3xl" />}
-      <div className="absolute inset-0 bg-background/55 backdrop-blur-2xl" />
+    // Transparent: the theme's background (painted on <body>) shows through the frosted pane.
+    <div className="fullscreen-pane fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal aria-label="Now playing">
 
       <Button
         variant="ghost"

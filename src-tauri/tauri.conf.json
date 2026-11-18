@@ -73,6 +73,17 @@
       "wix": {
         "language": "en-US"
       }
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "bran"
+        ],
+        "name": "Branflakes playlist",
+        "description": "Branflakes shared playlist",
+        "role": "Viewer",
+        "mimeType": "application/x-branflakes-playlist"
+      }
+    ]
   }
 }

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SpotifySyncSettings } from "./SpotifySyncSettings";
+import { ThemeSettings } from "./ThemeSettings";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -38,6 +39,7 @@ export function SettingsView() {
             <TabsTrigger value="accounts">Accounts</TabsTrigger>
             <TabsTrigger value="folders">Local folders</TabsTrigger>
             <TabsTrigger value="capabilities">Capabilities</TabsTrigger>
+            <TabsTrigger value="themes">Themes</TabsTrigger>
             <TabsTrigger value="general">General</TabsTrigger>
           </TabsList>
           <TabsContent value="accounts" className="space-y-4 pt-4">
@@ -48,6 +50,9 @@ export function SettingsView() {
           </TabsContent>
           <TabsContent value="capabilities" className="pt-4">
             <CapabilityMatrix />
+          </TabsContent>
+          <TabsContent value="themes" className="pt-4">
+            <ThemeSettings />
           </TabsContent>
           <TabsContent value="general" className="pt-4">
             <General />

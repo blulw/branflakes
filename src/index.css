@@ -25,9 +25,9 @@
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.78 0.14 165 / 60%);
   --sidebar: oklch(0.13 0.006 270);
-  /* Lyrics scrollbar: derived from the theme's foreground so it follows the theme. */
-  --scrollbar-thumb: color-mix(in oklch, var(--foreground) 18%, transparent);
-  --scrollbar-thumb-hover: color-mix(in oklch, var(--foreground) 35%, transparent);
+  /* Lyrics scrollbar: text colour tinted toward the theme's primary, so it follows every theme. */
+  --scrollbar-thumb: color-mix(in srgb, color-mix(in srgb, var(--foreground), var(--primary) 30%) 22%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, color-mix(in srgb, var(--foreground), var(--primary) 60%) 55%, transparent);
 
   /* Source identity colours (used only for the small source badges). */
   --source-local: oklch(0.8 0.12 85);
@@ -72,10 +72,35 @@
   html, body, #root {
     height: 100%;
   }
+  html {
+    background-color: var(--background);
+  }
+  /* body stays transparent so the theme's background layers (below) show through. */
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply text-foreground antialiased;
+    font-family: var(--app-font, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif);
     font-feature-settings: "tnum" 1;
     user-select: none;
+  }
+  /* Theme background image (Custom theme), then the theme's gradient/pattern overlay. */
+  body::before,
+  body::after {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    pointer-events: none;
+  }
+  body::before {
+    inset: calc(var(--app-image-blur, 0px) * -2);
+    background-image: var(--app-image, none);
+    background-size: var(--app-image-size, cover);
+    background-repeat: var(--app-image-repeat, no-repeat);
+    background-position: center;
+    filter: blur(var(--app-image-blur, 0px));
+  }
+  body::after {
+    inset: 0;
+    background: var(--app-overlay, none);
   }
   input, textarea, [data-selectable] {
     user-select: text;
@@ -110,4 +135,33 @@
 }
 .lyrics-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
+}
+
+html[data-glow] .lyrics-scroll::-webkit-scrollbar-thumb:hover {
+  box-shadow: 0 0 calc(var(--glow) * 10px) color-mix(in srgb, var(--glow-color) 60%, transparent);
+}
+
+/* Full-screen view: a translucent pane over the theme's background (colour, gradient, image). */
+.fullscreen-pane {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  backdrop-filter: blur(28px) saturate(1.15);
+}
+
+/* Themes: frosted translucent surfaces. */
+html[data-translucent] .bg-sidebar,
+html[data-translucent] .bg-card,
+html[data-translucent] .bg-popover {
+  backdrop-filter: blur(var(--surface-blur, 0px)) saturate(1.2);
+}
+
+/* Themes: glow (strength in --glow, 0–1). */
+html[data-glow] .bg-primary {
+  box-shadow: 0 0 calc(var(--glow) * 18px) color-mix(in srgb, var(--glow-color) 65%, transparent);
+}
+html[data-glow] .text-primary,
+html[data-glow] h1 {
+  text-shadow: 0 0 calc(var(--glow) * 12px) color-mix(in srgb, var(--glow-color) 70%, transparent);
+}
+html[data-glow] .bg-sidebar {
+  box-shadow: 0 0 calc(var(--glow) * 28px) color-mix(in srgb, var(--glow-color) 16%, transparent);
 }

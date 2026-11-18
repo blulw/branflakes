@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp } from "lucide-react";
+import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
 import { PlaylistCover } from "./PlaylistCover";
 import { PlaylistKindIcon } from "./PlaylistKind";
 import { api, toApiError } from "@/lib/api";
+import { chooseAndImportBran } from "@/lib/bran";
 import { PLAYLIST_SORT_LABEL, sortPlaylists, type PlaylistSort } from "@/lib/playlistSort";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -151,10 +152,13 @@ export function Sidebar({ width = 240, labels = true, titles = true }: { width?:
         </button>
       ))}
 
-      <div className="mt-4 flex items-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <FitText>
-          <span className="pl-3">Playlists</span>
-        </FitText>
+      {/* Three buttons don't fit side by side in the narrowest sidebar, so they stack there. */}
+      <div className={cn("mt-4 flex items-center text-xs font-medium uppercase tracking-wide text-muted-foreground", !titles && "flex-col gap-0.5")}>
+        {titles && (
+          <FitText>
+            <span className="pl-3">Playlists</span>
+          </FitText>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-5 shrink-0" aria-label={`Sort playlists (${PLAYLIST_SORT_LABEL[sort]})`} title={`Sorted by: ${PLAYLIST_SORT_LABEL[sort]}`}>
@@ -172,6 +176,9 @@ export function Sidebar({ width = 240, labels = true, titles = true }: { width?:
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button variant="ghost" size="icon" className="size-5 shrink-0" aria-label="Open shared playlist" title="Open a shared playlist (.bran)" onClick={() => void chooseAndImportBran()}>
+          <FileDown className="size-4" />
+        </Button>
         <Button variant="ghost" size="icon" className="size-5 shrink-0" aria-label="New playlist" title="New playlist" onClick={() => setCreating((c) => !c)}>
           <Plus className="size-4" />
         </Button>
@@ -199,7 +206,7 @@ export function Sidebar({ width = 240, labels = true, titles = true }: { width?:
           >
             <span className="relative shrink-0">
               <PlaylistCover path={p.artworkPath} className="size-8" />
-              {!titles && <PlaylistKindIcon playlist={p} className="absolute -bottom-1 -right-1 rounded-full bg-sidebar p-px" />}
+              {!titles && <PlaylistKindIcon playlist={p} className="absolute -bottom-1 -right-1 rounded-full bg-background p-px" />}
             </span>
             {titles && (
               <span className="min-w-0 flex-1 text-left">

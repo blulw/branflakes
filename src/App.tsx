@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { PlayerBar } from "@/components/PlayerBar";
+import { BranDropZone } from "@/components/BranDropZone";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 import { toApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import type { SyncEvent } from "@/lib/types";
@@ -97,7 +99,8 @@ export default function App() {
   }
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full flex-col">
+      {/* Hidden (not unmounted) under the full-screen view so the theme background shows through it. */}
+      <div className={cn("flex h-full flex-col", fullscreen && "invisible")} aria-hidden={fullscreen || undefined}>
         <div className="flex min-h-0 flex-1">
           <Sidebar width={layout.sidebarWidth} labels={layout.sidebarLabels} titles={layout.playlistTitles} />
           {/* Kept mounted (just hidden) so the view keeps its state when lyrics take over. */}
@@ -110,6 +113,7 @@ export default function App() {
       </div>
       {fullscreen && <FullscreenView />}
       <TrackEditorDialog />
+      <BranDropZone />
       <Toaster position="bottom-right" offset={{ bottom: 110 }} />
     </TooltipProvider>
   );

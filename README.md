@@ -30,6 +30,8 @@ It does **not** embed, automate, or talk over IPC to any other music application
 | Last.fm | Desktop auth, Now Playing and scrobbling for **local, Spotify and SoundCloud tracks** plus SoundCloud (Spotify can be turned off separately). The cache survives restarts and is retried in batches of 50. |
 | Find alternative | Unavailable Spotify tracks in a playlist get a **Find alternative** button. It searches your local files first, then SoundCloud, for the same song (title and artist), and adds your pick right after the original, which stays. |
 | Lyrics | The microphone button in the player bar opens a lyrics panel for the playing song. The words always come from **Genius**. Timing comes from **LRCLIB**, and for songs LRCLIB doesn't have, from **Musixmatch** and **NetEase Cloud Music** (Settings → General, on by default). The timing is matched word by word onto Genius's lines, so the current line is highlighted and followed, and clicking a line seeks there (when the source can seek). When no timing matches, Genius's text is shown unsynced. No account or API key is needed. |
+| Sharing playlists | The **Share** button on a playlist saves it as one **`.bran`** file: name, description, cover, every track in order, Spotify and SoundCloud tracks (as links to the same songs), your edited titles/covers, and the **audio of local tracks** packed inside. Open one by **double-clicking** it, **dropping** it onto the window, or the open-file button next to *Playlists*. It is added as a new playlist; local songs from it are stored in `…\shared\` (one copy per song, however often it is imported). The recipient needs their own Spotify/SoundCloud access to play those tracks. |
+| Themes | Settings → Themes has 50 themes (Candy Floss, Galaxy, Synthwave, Frosted Glass, …), each shown with a colour palette and a few words describing it. Some use translucent frosted surfaces or a glow. **Custom** lets you set every colour, surface opacity and blur, glow, a gradient, corner roundness, the font and your own background image (with fit, tint and blur). Saved on this computer. |
 | Playback | Each provider declares its capabilities, and the UI disables any control the active source can't perform, with a tooltip saying why. One source owns playback at a time. Previous / Play-Pause / Next buttons appear in the Windows taskbar hover thumbnail. |
 
 ## Requirements
@@ -52,8 +54,8 @@ npm run tauri build      # release build + installers
 Build outputs:
 
 - `src-tauri/target/release/branflakes.exe`
-- `src-tauri/target/release/bundle/nsis/branflakes_0.2.1_x64-setup.exe` — per-user installer with an uninstaller (Apps & Features)
-- `src-tauri/target/release/bundle/msi/branflakes_0.2.1_x64_en-US.msi` — MSI package
+- `src-tauri/target/release/bundle/nsis/branflakes_0.6.0_x64-setup.exe` — per-user installer with an uninstaller (Apps & Features)
+- `src-tauri/target/release/bundle/msi/branflakes_0.6.0_x64_en-US.msi` — MSI package
 
 The installers are **not code-signed**. Windows SmartScreen will warn until you sign them with your own certificate (see the Tauri docs on Windows code signing).
 
@@ -76,7 +78,7 @@ Provider adapter tests run against a local mock HTTP server (`mockito`), so they
 ## Data and privacy
 
 - **Library database:** `%APPDATA%\com.unifiedmusic.desktop\library.sqlite3`
-- **Artwork cache:** `…\artwork\`. **Tag-edit backups:** `…\backups\` (never deleted automatically).
+- **Artwork cache:** `…\artwork\`. **Tag-edit backups:** `…\backups\` (never deleted automatically). **Local songs from shared `.bran` playlists:** `…\shared\`.
 - **Secrets** (OAuth tokens, the SoundCloud client secret, the Last.fm shared secret and session key) are stored as generic credentials in **Windows Credential Manager** under `com.unifiedmusic.desktop`. They are never written to SQLite or logs.
 - **Lyrics lookups** send only the song title, artist, album and length to Genius, LRCLIB and (when enabled) Musixmatch and NetEase. Results are cached per track in SQLite.
 - The asset protocol (used to play local files and show cached artwork) only serves your library folders and the artwork cache.
