@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AlertCircle, Maximize2, MicVocal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Artwork } from "./Artwork";
@@ -12,6 +12,11 @@ import { cn } from "@/lib/utils";
 import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 import type { ControlState } from "@/playback/controls";
+
+/** Fixed width of the horizontal volume control (mute button + bar), w-36. */
+const VOLUME_WIDTH = 144;
+/** Container width of Tailwind's @2xl, where the player switches to three proportional columns. */
+const THREE_COLUMN_MIN = 672;
 
 function Ctl({ state, label, onClick, children, className }: { state: ControlState; label: string; onClick: () => void; children: React.ReactNode; className?: string }) {
   const button = (
@@ -47,8 +52,33 @@ export function PlayerBar() {
 
   const VolumeIcon = st.volume === 0 ? VolumeX : st.volume < 0.5 ? Volume1 : Volume2;
 
+  // The horizontal volume bar has a fixed width; when the right column can't hold it beside
+  // the other buttons, it becomes a vertical bar that pops up on hover instead of shrinking.
+  const footerRef = useRef<HTMLElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const buttonsRef = useRef<HTMLDivElement>(null);
+  const [wideVolume, setWideVolume] = useState(false);
+  useLayoutEffect(() => {
+    const footer = footerRef.current;
+    const right = rightRef.current;
+    const buttons = buttonsRef.current;
+    if (!footer || !right || !buttons) return;
+    const measure = () => {
+      // Below the 3-column breakpoint the right column is sized to its content, so it always "fits";
+      // there the cover and controls need the room, so use the pop-up bar.
+      const columns = footer.clientWidth >= THREE_COLUMN_MIN;
+      const gap = parseFloat(getComputedStyle(right).columnGap) || 0;
+      setWideVolume(columns && right.clientWidth >= buttons.offsetWidth + gap + VOLUME_WIDTH);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(footer);
+    ro.observe(buttons);
+    return () => ro.disconnect();
+  }, [c.volume.enabled]);
+
   return (
-    <footer className="@container/player h-24 shrink-0 border-t bg-sidebar">
+    <footer ref={footerRef} className="@container/player h-24 shrink-0 border-t bg-sidebar">
      <div className="grid h-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 @2xl/player:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] @2xl/player:gap-4 @2xl/player:px-4">
       {/* Now playing */}
       <div className="flex min-w-0 items-center gap-3">
@@ -93,7 +123,8 @@ export function PlayerBar() {
       <Transport />
 
       {/* Device + volume */}
-      <div className="flex items-center justify-end gap-1 @2xl/player:gap-2">
+      <div ref={rightRef} className="flex items-center justify-end gap-1 @2xl/player:gap-2">
+        <div ref={buttonsRef} className="flex shrink-0 items-center gap-1 @2xl/player:gap-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -118,12 +149,32 @@ export function PlayerBar() {
           <TooltipContent>Full screen</TooltipContent>
         </Tooltip>
         {track?.source === "spotify" && c.deviceSelection.enabled && <DevicePicker />}
+        </div>
         {c.volume.enabled ? (
-          <div className="flex items-center gap-2 @3xl/player:w-28 @5xl/player:w-36">
-            <Button variant="ghost" size="icon" className="size-8" aria-label={st.volume === 0 ? "Unmute" : "Mute"} onClick={() => void st.setVolume(st.volume === 0 ? 0.8 : 0)}>
+          <div className={cn("relative flex shrink-0 items-center gap-2", wideVolume ? "w-36" : "group")}>
+            <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={st.volume === 0 ? "Unmute" : "Mute"} onClick={() => void st.setVolume(st.volume === 0 ? 0.8 : 0)}>
               <VolumeIcon className="size-4" />
             </Button>
-            <Slider className="hidden @3xl/player:flex" aria-label="Volume" min={0} max={100} step={1} value={[Math.round(st.volume * 100)]} onValueChange={([v]) => void st.setVolume(v / 100)} />
+            {wideVolume ? (
+              <Slider aria-label="Volume" min={0} max={100} step={1} value={[Math.round(st.volume * 100)]} onValueChange={([v]) => void st.setVolume(v / 100)} />
+            ) : (
+              // Too narrow for the horizontal bar: a vertical one pops up above the button on hover.
+              // The bottom padding bridges the gap so the pointer can travel from the button to the bar.
+              <div className="invisible absolute bottom-full left-1/2 z-50 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+                <div className="rounded-full border bg-popover px-2 py-3 shadow-md">
+                  <Slider
+                    orientation="vertical"
+                    className="min-h-28"
+                    aria-label="Volume"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={[Math.round(st.volume * 100)]}
+                    onValueChange={([v]) => void st.setVolume(v / 100)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           track && (

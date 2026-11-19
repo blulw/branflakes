@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Loader2, Minimize2, Music2, Volume1, Volume2, VolumeX } from "lucide-react";
 import { Artwork } from "./Artwork";
@@ -10,47 +10,53 @@ import { usePlayer } from "@/playback/store";
 import { useUi } from "@/state/ui";
 
 /**
- * Keeps the window maximized (title bar and taskbar stay — not exclusive
- * full screen) and unresizable while the full-screen view is open, then
- * puts it back the way it was.
+ * Maximizes the window (title bar and taskbar stay — not exclusive full
+ * screen) while the full-screen view is open, without locking it there: if
+ * the user resizes or moves the window out of maximized, the view closes
+ * and the window stays where they put it. Closing the view any other way
+ * puts the window back the way it was.
  */
-function useLockedMaximized() {
+function useMaximizedWhileOpen(onLeave: () => void) {
   useEffect(() => {
     const win = getCurrentWindow();
     let active = true;
-    let unlisten: (() => void) | undefined;
+    let userLeft = false;
+    const unlisteners: (() => void)[] = [];
+    const check = async () => {
+      if (!active) return;
+      const [max, min] = await Promise.all([win.isMaximized(), win.isMinimized()]);
+      if (active && !max && !min) {
+        userLeft = true;
+        onLeave();
+      }
+    };
     const setup = (async () => {
       const wasMaximized = await win.isMaximized().catch(() => true);
       await win.maximize().catch(() => undefined);
-      await win.setResizable(false).catch(() => undefined);
-      // Snap back if something (e.g. a title-bar double-click) restores it.
-      const off = await win
-        .onResized(async () => {
-          if (!active) return;
-          const [max, min] = await Promise.all([win.isMaximized(), win.isMinimized()]);
-          if (active && !max && !min) void win.maximize();
-        })
-        .catch(() => undefined);
-      if (active) unlisten = off;
-      else off?.();
+      // Listen only once maximized, so the maximize itself doesn't count as the user leaving.
+      for (const listen of [win.onResized.bind(win), win.onMoved.bind(win)]) {
+        const off = await listen(() => void check()).catch(() => undefined);
+        if (!off) continue;
+        if (active) unlisteners.push(off);
+        else off();
+      }
       return wasMaximized;
     })();
     return () => {
       active = false;
-      unlisten?.();
+      unlisteners.forEach((off) => off());
       void setup.then(async (wasMaximized) => {
-        await win.setResizable(true).catch(() => undefined);
-        if (!wasMaximized) await win.unmaximize().catch(() => undefined);
+        if (!wasMaximized && !userLeft) await win.unmaximize().catch(() => undefined);
       });
     };
-  }, []);
+  }, [onLeave]);
 }
 
 export function FullscreenView() {
   const track = usePlayer((s) => s.currentTrack());
   const setFullscreen = useUi((s) => s.setFullscreen);
   const { load, lyrics, showSynced } = useLyrics(track?.id ?? null);
-  useLockedMaximized();
+  useMaximizedWhileOpen(useCallback(() => setFullscreen(false), [setFullscreen]));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFullscreen(false);
