@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MonitorSpeaker, RefreshCw, Check, Laptop } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,12 +25,16 @@ export function DevicePicker() {
 
   return (
     <DropdownMenu onOpenChange={(o) => o && void refreshSpotifyDevices()}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="max-w-44 gap-1.5 text-xs text-source-spotify" aria-label="Choose Spotify Connect device">
-          <MonitorSpeaker className="size-4" />
-          <span className="truncate">{current?.name ?? "Choose device"}</span>
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8 text-source-spotify" aria-label={current ? `Spotify device: ${current.name}` : "Choose Spotify Connect device"}>
+              <MonitorSpeaker className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{current?.name ?? "Choose device"}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="w-72">
         <DropdownMenuLabel className="flex items-center justify-between">
           Spotify Connect devices
