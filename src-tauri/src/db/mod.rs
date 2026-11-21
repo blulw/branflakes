@@ -5,6 +5,7 @@ pub mod playlists;
 pub mod queue;
 pub mod scrobbles;
 pub mod alternatives;
+pub mod artists;
 pub mod settings;
 pub mod spotify_links;
 
@@ -23,6 +24,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (6, include_str!("../../migrations/0006_track_loudness.sql")),
     (7, include_str!("../../migrations/0007_lyrics_cache.sql")),
     (8, include_str!("../../migrations/0008_lyrics_cache_complete.sql")),
+    (9, include_str!("../../migrations/0009_followed_artists.sql")),
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

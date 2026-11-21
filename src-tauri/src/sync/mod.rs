@@ -5,7 +5,7 @@
 //! * `sync_playlist` — one reconciliation pass for one playlist.
 //! * `add_tracks` — the playlist add rule: non-Spotify tracks added to a
 //!   synced playlist create a Branflakes-only copy instead.
-//! * `SyncEngine` — the backend scheduler (default every 5 minutes, plus
+//! * `SyncEngine` — the backend scheduler (default every 120 minutes, plus
 //!   debounced syncs after local edits and manual "sync now").
 //!
 //! Safety rules:
@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_INTERVAL_SECS: u64 = 300;
+pub const DEFAULT_INTERVAL_SECS: u64 = 7200;
 pub const MIN_INTERVAL_SECS: u64 = 60;
 /// Wait after a local edit before pushing, so a burst of edits is one sync.
 pub const EDIT_DEBOUNCE: Duration = Duration::from_secs(3);
@@ -674,7 +674,7 @@ async fn pass(ctx: &SyncCtx<'_>, playlist_id: &str, manual: bool) -> AppResult<P
     let remote_unchanged = link.snapshot_id.is_some() && meta.snapshot_id == link.snapshot_id;
     let mut remote_items: Option<Vec<RemoteItem>> = None;
     let remote: Vec<String> = if remote_unchanged && !local_changed {
-        link.base_items.clone() // nothing to read: avoids a full fetch every 5 minutes
+        link.base_items.clone() // nothing to read: avoids a full fetch every interval
     } else {
         let items = ctx.spotify.playlist_items_all(cid, &sp_id).await.map_err(|e| permission_error(e, "read this playlist"))?;
         let uris = items.iter().map(|i| i.uri.clone()).collect();

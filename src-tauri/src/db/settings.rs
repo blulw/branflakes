@@ -17,8 +17,10 @@ pub const SOUNDCLOUD_WEB_MODE: &str = "soundcloud.web_mode_enabled";
 pub const SPOTIFY_PREMIUM_DENIED: &str = "spotify.premium_denied";
 /// Spotify user id of the connected account (for playlist ownership checks).
 pub const SPOTIFY_USER_ID: &str = "spotify.user_id";
-/// Automatic playlist sync interval in seconds (default 300).
+/// Automatic playlist sync interval in seconds (default 7200).
 pub const SPOTIFY_SYNC_INTERVAL: &str = "spotify.sync_interval_secs";
+/// Automatic followed-artist sync interval in seconds (default 86400).
+pub const ARTIST_SYNC_INTERVAL: &str = "spotify.artist_sync_interval_secs";
 /// Normalize in-app playback loudness across tracks (default on).
 pub const NORMALIZE_VOLUME: &str = "playback.normalize_volume";
 /// Also use Musixmatch and NetEase for lyrics timing (default on).

@@ -46,6 +46,8 @@ pub struct AppState {
     pub taskbar: Mutex<Option<crate::taskbar::TaskbarHandle>>,
     /// Spotify playlist sync scheduler state.
     pub sync: crate::sync::SyncEngine,
+    /// Followed-artist sync scheduler state.
+    pub artist_sync: crate::artist_sync::ArtistSyncEngine,
     /// Only one interactive sign-in may run at a time (shared loopback port).
     pub oauth_lock: tokio::sync::Mutex<()>,
 }

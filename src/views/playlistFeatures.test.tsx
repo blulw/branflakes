@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     calls.push({ cmd, args });
     switch (cmd) {
       case "playlist_list":
+      case "artists_list":
         return [];
       case "playlist_create":
         return { playlist: { id: "new", name: args.name }, spotifyError: null };

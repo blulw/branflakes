@@ -14,6 +14,7 @@ pub mod state;
 pub mod sync;
 pub mod taskbar;
 pub mod alternatives;
+pub mod artist_sync;
 pub mod loudness;
 pub mod loudness_capture;
 pub mod lyrics;
@@ -88,6 +89,7 @@ pub fn run() {
                 taskbar: Mutex::new(None),
                 oauth_lock: tokio::sync::Mutex::new(()),
                 sync: sync::SyncEngine::default(),
+                artist_sync: artist_sync::ArtistSyncEngine::default(),
             };
             app.manage(state);
 
@@ -115,6 +117,8 @@ pub fn run() {
 
             // Spotify playlist sync runs in the backend, independent of the window.
             tauri::async_runtime::spawn(commands::sync_scheduler(app.handle().clone()));
+            // Followed artists are synced in the backend too (default daily).
+            tauri::async_runtime::spawn(commands::artist_sync_scheduler(app.handle().clone()));
 
             // Periodically retry cached scrobbles.
             let handle = app.handle().clone();
@@ -192,6 +196,15 @@ pub fn run() {
             commands::spotify_sync_now,
             commands::spotify_sync_all,
             commands::playlist_link_spotify,
+            commands::artists_search_spotify,
+            commands::artists_list,
+            commands::artists_get,
+            commands::artists_follow,
+            commands::artists_unfollow,
+            commands::artists_tracks,
+            commands::artists_set_auto_sync,
+            commands::artists_mark_seen,
+            commands::artists_sync_now,
             commands::alternatives_search,
             commands::alternatives_add,
             commands::alternatives_list,

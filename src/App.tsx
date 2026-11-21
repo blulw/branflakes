@@ -11,7 +11,8 @@ import { toApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import type { SyncEvent } from "@/lib/types";
+import type { ArtistSyncEvent, SyncEvent } from "@/lib/types";
+import { FollowedArtistView, FollowedArtistsView } from "@/views/FollowedArtists";
 import { LibraryView } from "@/views/LibraryView";
 import { AlbumsView, ArtistsView } from "@/views/BrowseViews";
 import { PlaylistView } from "@/views/PlaylistView";
@@ -42,6 +43,10 @@ function CurrentView() {
       return <QueueView />;
     case "search":
       return <SearchView />;
+    case "followed":
+      return <FollowedArtistsView />;
+    case "followedArtist":
+      return <FollowedArtistView key={view.id} id={view.id} />;
     case "settings":
       return <SettingsView />;
   }
@@ -68,6 +73,18 @@ export default function App() {
         if (e.payload.status === "removed" && e.payload.message) toast.warning("Spotify playlist removed", { description: e.payload.message, duration: 15000 });
         if (ui.view.name === "playlist" && ui.view.id === e.payload.playlistId) ui.navigate({ name: "library" });
       }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  // Followed-artist syncs (scheduled or manual) also run in the backend.
+  useEffect(() => {
+    const un = listen<ArtistSyncEvent>("artist-sync", (e) => {
+      const ui = useUi.getState();
+      ui.setArtistSyncing(e.payload.artistId, e.payload.status === "syncing");
+      if (e.payload.status !== "syncing") void ui.refreshFollowed().catch(() => undefined);
     });
     return () => {
       void un.then((f) => f());

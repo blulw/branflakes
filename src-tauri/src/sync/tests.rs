@@ -846,9 +846,9 @@ fn ordinary_playlists_are_unaffected() {
 // ----------------------------------------------------------- scheduler
 
 #[test]
-fn interval_defaults_to_five_minutes_and_is_configurable() {
+fn interval_defaults_to_two_hours_and_is_configurable() {
     let conn = open_in_memory().unwrap();
-    assert_eq!(interval(&conn), Duration::from_secs(300));
+    assert_eq!(interval(&conn), Duration::from_secs(7200));
     crate::db::settings::set(&conn, crate::db::settings::SPOTIFY_SYNC_INTERVAL, "900").unwrap();
     assert_eq!(interval(&conn), Duration::from_secs(900));
     crate::db::settings::set(&conn, crate::db::settings::SPOTIFY_SYNC_INTERVAL, "5").unwrap();

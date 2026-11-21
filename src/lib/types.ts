@@ -296,6 +296,8 @@ export interface AppSettings {
   lastfmScrobbleSpotify: boolean;
   oauthPort: number;
   spotifySyncIntervalMinutes: number;
+  /** Followed artists sync automatically every this many hours (default 24). */
+  artistSyncIntervalHours: number;
   /** Scale in-app playback towards a common loudness. */
   normalizeVolume: boolean;
   /** Also use Musixmatch and NetEase for lyrics timing. */
@@ -316,6 +318,7 @@ export interface SettingsPatch {
   lastfmScrobbleSpotify?: boolean;
   oauthPort?: number;
   spotifySyncIntervalMinutes?: number;
+  artistSyncIntervalHours?: number;
   normalizeVolume?: boolean;
   lyricsExtraSources?: boolean;
 }
@@ -454,4 +457,51 @@ export interface BranSummary {
   tracks: number;
   localFiles: number;
   appVersion: string;
+}
+
+/** A Spotify artist profile (search result or followed). */
+export interface SpotifyArtist {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  genres: string[];
+}
+
+export interface ArtistSearchResult extends SpotifyArtist {
+  followed: boolean;
+}
+
+export interface FollowedArtist extends SpotifyArtist {
+  autoSync: boolean;
+  addedAt: string;
+  lastSyncedAt: string | null;
+  lastAttemptAt: string | null;
+  lastError: string | null;
+  trackCount: number;
+  newCount: number;
+}
+
+/** A track on a followed artist's page. */
+export interface ArtistTrack extends Track {
+  /** Found by a sync after the first one, and not marked as seen yet. */
+  isNew: boolean;
+  albumType: string;
+  releaseDate: string;
+  foundAt: string;
+}
+
+export interface ArtistSyncReport {
+  artistId: string;
+  added: number;
+  newTracks: number;
+  totalTracks: number;
+  firstSync: boolean;
+}
+
+/** Backend `artist-sync` event. */
+export interface ArtistSyncEvent {
+  artistId: string;
+  status: "syncing" | "ok" | "error";
+  newTracks: number;
+  message: string | null;
 }
