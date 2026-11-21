@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp, FileDown } from "lucide-react";
+import { Library, Mic2, Disc, Search, Settings, Plus, ListOrdered, ArrowDownUp, FileDown, UserRoundCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ const NAV: { view: View; label: string; icon: typeof Library }[] = [
   { view: { name: "library" }, label: "Songs", icon: Library },
   { view: { name: "artists" }, label: "Artists", icon: Mic2 },
   { view: { name: "albums" }, label: "Albums", icon: Disc },
+  { view: { name: "followed" }, label: "Followed artists", icon: UserRoundCheck },
   { view: { name: "queue" }, label: "Queue", icon: ListOrdered },
 ];
 
@@ -51,7 +52,8 @@ function loadSort(): PlaylistSort {
  * when there's no room: button labels first, then playlist titles.
  */
 export function Sidebar({ width = 240, labels = true, titles = true }: { width?: number; labels?: boolean; titles?: boolean }) {
-  const { view, navigate, playlists, refreshPlaylists } = useUi();
+  const { view, navigate, playlists, refreshPlaylists, followed, refreshFollowed } = useUi();
+  const newFromFollowed = followed.reduce((n, a) => n + a.newCount, 0);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [withSpotify, setWithSpotify] = useState(false);
@@ -62,7 +64,8 @@ export function Sidebar({ width = 240, labels = true, titles = true }: { width?:
 
   useEffect(() => {
     void refreshPlaylists();
-  }, [refreshPlaylists]);
+    void refreshFollowed().catch(() => undefined);
+  }, [refreshPlaylists, refreshFollowed]);
 
   const changeSort = (s: string) => {
     setSort(s as PlaylistSort);
@@ -142,13 +145,24 @@ export function Sidebar({ width = 240, labels = true, titles = true }: { width?:
       {NAV.map(({ view: v, label, icon: Icon }) => (
         <button
           key={label}
-          className={item(view.name === v.name || (v.name === "artists" && view.name === "artist") || (v.name === "albums" && view.name === "album"))}
+          className={item(
+            view.name === v.name ||
+              (v.name === "artists" && view.name === "artist") ||
+              (v.name === "albums" && view.name === "album") ||
+              (v.name === "followed" && view.name === "followedArtist"),
+          )}
           onClick={() => navigate(v)}
-          aria-label={label}
-          title={labels ? undefined : label}
+          aria-label={v.name === "followed" && newFromFollowed ? `${label} (${newFromFollowed} new tracks)` : label}
+          title={labels ? undefined : v.name === "followed" && newFromFollowed ? `${label} · ${newFromFollowed} new` : label}
         >
-          <Icon className="size-4 shrink-0" />
+          <span className="relative shrink-0">
+            <Icon className="size-4" />
+            {v.name === "followed" && newFromFollowed > 0 && !labels && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-primary" aria-hidden />}
+          </span>
           {labels && <FitText>{label}</FitText>}
+          {labels && v.name === "followed" && newFromFollowed > 0 && (
+            <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{newFromFollowed}</span>
+          )}
         </button>
       ))}
 

@@ -16,6 +16,9 @@ use crate::scrobbler::{self, FlushReport, SubmitOutcome};
 use crate::secrets::{self, Secret};
 use crate::state::{require, AppState};
 use crate::sync::{self, AddOutcome, SyncCtx, SyncEvent, SyncReport};
+use crate::artist_sync::{self, ArtistSyncEvent, ArtistSyncReport};
+use crate::db::artists::{self as followed, ArtistTrack, FollowedArtist};
+use crate::providers::spotify::SpotifyArtist;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -590,8 +593,10 @@ pub struct AppSettings {
     pub lastfm_enabled: bool,
     pub lastfm_scrobble_spotify: bool,
     pub oauth_port: u16,
-    /// Automatic Spotify playlist sync interval (minutes, default 5).
+    /// Automatic Spotify playlist sync interval (minutes, default 120).
     pub spotify_sync_interval_minutes: u64,
+    /// Automatic followed-artist sync interval (hours, default 24).
+    pub artist_sync_interval_hours: u64,
     /// Scale in-app playback towards a common loudness (default on).
     pub normalize_volume: bool,
     /// Also use Musixmatch and NetEase for lyrics timing (default on).
@@ -616,6 +621,7 @@ pub fn settings_get(state: S<'_>) -> AppResult<AppSettings> {
         lastfm_scrobble_spotify: settings::get_bool(&conn, settings::LASTFM_SCROBBLE_SPOTIFY, true)?,
         oauth_port: port,
         spotify_sync_interval_minutes: sync::interval(&conn).as_secs() / 60,
+        artist_sync_interval_hours: artist_sync::interval(&conn).as_secs() / 3600,
         normalize_volume: settings::get_bool(&conn, settings::NORMALIZE_VOLUME, true)?,
         lyrics_extra_sources: settings::get_bool(&conn, settings::LYRICS_EXTRA_SOURCES, true)?,
         spotify_redirect_uri: oauth::redirect_uri(port, "spotify"),
@@ -638,6 +644,7 @@ pub struct SettingsPatch {
     pub lastfm_scrobble_spotify: Option<bool>,
     pub oauth_port: Option<u16>,
     pub spotify_sync_interval_minutes: Option<u64>,
+    pub artist_sync_interval_hours: Option<u64>,
     pub normalize_volume: Option<bool>,
     pub lyrics_extra_sources: Option<bool>,
 }
@@ -676,6 +683,13 @@ pub fn settings_update(state: S<'_>, patch: SettingsPatch) -> AppResult<AppSetti
             }
             settings::set(&conn, settings::SPOTIFY_SYNC_INTERVAL, &(m * 60).to_string())?;
             state.sync.wake.notify_one();
+        }
+        if let Some(h) = patch.artist_sync_interval_hours {
+            if !(1..=720).contains(&h) {
+                return Err(AppError::InvalidInput("artist sync interval must be between 1 and 720 hours".into()));
+            }
+            settings::set(&conn, settings::ARTIST_SYNC_INTERVAL, &(h * 3600).to_string())?;
+            state.artist_sync.wake.notify_one();
         }
         if let Some(p) = patch.oauth_port {
             if p < 1024 {
@@ -1134,6 +1148,158 @@ pub async fn sync_scheduler(app: AppHandle) {
         }
     }
     log::info!("spotify sync scheduler stopped");
+}
+
+// ================================================ followed spotify artists
+
+fn spotify_ready(state: &AppState) -> AppResult<String> {
+    if !state.secrets.has(secrets::SPOTIFY_TOKENS) {
+        return Err(AppError::NotConnected { provider: "spotify".into() });
+    }
+    spotify_client_id(state)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtistSearchResult {
+    #[serde(flatten)]
+    pub artist: SpotifyArtist,
+    pub followed: bool,
+}
+
+#[tauri::command]
+pub async fn artists_search_spotify(state: S<'_>, query: String) -> AppResult<Vec<ArtistSearchResult>> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(vec![]);
+    }
+    let cid = spotify_ready(&state)?;
+    let found = state.spotify.search_artists(&cid, q).await?;
+    let conn = state.conn();
+    found
+        .into_iter()
+        .map(|a| Ok(ArtistSearchResult { followed: followed::is_followed(&conn, &a.id)?, artist: a }))
+        .collect()
+}
+
+#[tauri::command]
+pub fn artists_list(state: S<'_>) -> AppResult<Vec<FollowedArtist>> {
+    followed::list(&state.conn())
+}
+
+#[tauri::command]
+pub fn artists_get(state: S<'_>, id: String) -> AppResult<FollowedArtist> {
+    followed::get(&state.conn(), &id)
+}
+
+/// Follow an artist. The first sync (reading every release) starts right
+/// away in the background; nothing found by it is flagged new.
+#[tauri::command]
+pub async fn artists_follow(app: AppHandle, state: S<'_>, artist: SpotifyArtist) -> AppResult<FollowedArtist> {
+    if artist.id.trim().is_empty() {
+        return Err(AppError::InvalidInput("artist id must not be empty".into()));
+    }
+    let a = followed::follow(&state.conn(), &artist)?;
+    let id = a.id.clone();
+    tauri::async_runtime::spawn(async move {
+        let st = app.state::<AppState>();
+        let _ = run_artist_sync(&app, &st, &id).await;
+    });
+    Ok(a)
+}
+
+#[tauri::command]
+pub fn artists_unfollow(state: S<'_>, id: String) -> AppResult<()> {
+    followed::unfollow(&state.conn(), &id)
+}
+
+#[tauri::command]
+pub fn artists_tracks(state: S<'_>, id: String) -> AppResult<Vec<ArtistTrack>> {
+    followed::tracks(&state.conn(), &id)
+}
+
+#[tauri::command]
+pub fn artists_set_auto_sync(state: S<'_>, id: String, on: bool) -> AppResult<FollowedArtist> {
+    let conn = state.conn();
+    followed::set_auto_sync(&conn, &id, on)?;
+    state.artist_sync.wake.notify_one();
+    followed::get(&conn, &id)
+}
+
+#[tauri::command]
+pub fn artists_mark_seen(state: S<'_>, id: String) -> AppResult<FollowedArtist> {
+    let conn = state.conn();
+    followed::mark_seen(&conn, &id)?;
+    followed::get(&conn, &id)
+}
+
+#[tauri::command]
+pub async fn artists_sync_now(app: AppHandle, state: S<'_>, id: String) -> AppResult<ArtistSyncReport> {
+    run_artist_sync(&app, &state, &id).await
+}
+
+fn emit_artist(app: &AppHandle, ev: ArtistSyncEvent) {
+    let _ = app.emit("artist-sync", ev);
+}
+
+/// Sync one followed artist (manual or scheduled), emitting `artist-sync` events.
+pub async fn run_artist_sync(app: &AppHandle, state: &AppState, id: &str) -> AppResult<ArtistSyncReport> {
+    let cid = spotify_ready(state)?;
+    let Some(_guard) = state.artist_sync.begin(id) else {
+        return Err(AppError::Other("this artist is already syncing".into()));
+    };
+    emit_artist(app, ArtistSyncEvent { artist_id: id.into(), status: "syncing".into(), new_tracks: 0, message: None });
+    let _run = state.artist_sync.run_lock.lock().await;
+    let r = artist_sync::sync_artist(&state.db, &state.spotify, &cid, id).await;
+    match &r {
+        Ok(rep) => emit_artist(app, ArtistSyncEvent { artist_id: id.into(), status: "ok".into(), new_tracks: rep.new_tracks, message: None }),
+        Err(e) => emit_artist(app, ArtistSyncEvent { artist_id: id.into(), status: "error".into(), new_tracks: 0, message: Some(e.to_string()) }),
+    }
+    r
+}
+
+/// Backend scheduler for followed artists: checks every few minutes and
+/// syncs each artist with auto sync on once per interval (default 24 h).
+pub async fn artist_sync_scheduler(app: AppHandle) {
+    let state = app.state::<AppState>();
+    // Let startup (and the playlist sync's first pass) settle first.
+    let mut wait = Duration::from_secs(90);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = state.artist_sync.wake.notified() => {}
+        }
+        wait = Duration::from_secs(300);
+        if state.sync.is_shutdown() {
+            break;
+        }
+        // Shares the playlist sync's pause after rate limits / going offline.
+        if state.sync.backoff_until().is_some() || spotify_ready(&state).is_err() {
+            continue;
+        }
+        let interval = artist_sync::interval(&state.conn());
+        let now = chrono::Utc::now();
+        let due: Vec<String> = followed::list(&state.conn())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| artist_sync::is_due(a, now, interval))
+            .map(|a| a.id)
+            .collect();
+        for id in due {
+            if state.sync.is_shutdown() {
+                break;
+            }
+            if let Err(e) = run_artist_sync(&app, &state, &id).await {
+                if let Some(d) = sync::backoff_for(&e, interval) {
+                    log::info!("artist sync paused for {d:?}: {e}");
+                    state.sync.back_off(d);
+                    break;
+                }
+                log::info!("artist sync of {id} failed: {e}");
+            }
+        }
+    }
+    log::info!("artist sync scheduler stopped");
 }
 
 // ====================================================== find alternative

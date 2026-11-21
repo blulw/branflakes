@@ -119,6 +119,25 @@ pub struct SpotifyPlaylistSummary {
 }
 
 /// `GET /playlists/{id}` metadata used by sync (no items).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotifyArtist {
+    pub id: String,
+    pub name: String,
+    pub image_url: Option<String>,
+    pub genres: Vec<String>,
+}
+
+/// An album or single from `GET /artists/{id}/albums`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpotifyRelease {
+    pub id: String,
+    pub name: String,
+    pub album_type: String,
+    /// `YYYY`, `YYYY-MM` or `YYYY-MM-DD`.
+    pub release_date: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlaylistMeta {
     pub id: String,
@@ -583,6 +602,98 @@ impl SpotifyAdapter {
             .unwrap_or_default())
     }
 
+    // ------------------------------------------------- artists
+
+    fn map_artist(v: &Value) -> Option<SpotifyArtist> {
+        Some(SpotifyArtist {
+            id: v.get("id").and_then(Value::as_str)?.to_string(),
+            name: v.get("name").and_then(Value::as_str).unwrap_or("Unknown artist").to_string(),
+            image_url: v.pointer("/images/0/url").and_then(Value::as_str).map(String::from),
+            genres: v
+                .get("genres")
+                .and_then(Value::as_array)
+                .map(|g| g.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Artist search (Development Mode: at most 10 results per request).
+    pub async fn search_artists(&self, client_id: &str, q: &str) -> AppResult<Vec<SpotifyArtist>> {
+        let v = self
+            .get(client_id, "/search", &[("q", q.into()), ("type", "artist".into()), ("limit", SEARCH_LIMIT.to_string())])
+            .await?;
+        Ok(v.pointer("/artists/items")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Self::map_artist).collect())
+            .unwrap_or_default())
+    }
+
+    pub async fn artist(&self, client_id: &str, artist_id: &str) -> AppResult<SpotifyArtist> {
+        let v = self.get(client_id, &format!("/artists/{}", urlencoding::encode(artist_id)), &[]).await?;
+        Self::map_artist(&v).ok_or_else(|| AppError::NotFound(format!("Spotify artist {artist_id}")))
+    }
+
+    /// Every album and single released by the artist (not compilations or
+    /// "appears on"). Paged 10 at a time, which Development Mode allows.
+    pub async fn artist_releases(&self, client_id: &str, artist_id: &str) -> AppResult<Vec<SpotifyRelease>> {
+        let mut out = Vec::new();
+        let path = format!("/artists/{}/albums", urlencoding::encode(artist_id));
+        let mut v = self
+            .get(client_id, &path, &[("include_groups", "album,single".into()), ("limit", "10".into()), ("market", "from_token".into())])
+            .await?;
+        loop {
+            for a in v.get("items").and_then(Value::as_array).into_iter().flatten() {
+                let Some(id) = a.get("id").and_then(Value::as_str) else { continue };
+                out.push(SpotifyRelease {
+                    id: id.to_string(),
+                    name: a.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    album_type: a.get("album_type").and_then(Value::as_str).unwrap_or("album").to_string(),
+                    release_date: a.get("release_date").and_then(Value::as_str).unwrap_or_default().to_string(),
+                });
+            }
+            match v.get("next").and_then(Value::as_str) {
+                Some(next) => v = self.get(client_id, next, &[]).await?,
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
+    /// The tracks of one release that credit `artist_id`. Album tracks come
+    /// without their album, so it is filled in from the release itself.
+    pub async fn release_tracks(&self, client_id: &str, album_id: &str, artist_id: &str) -> AppResult<Vec<TrackUpsert>> {
+        let album = self.get(client_id, &format!("/albums/{}", urlencoding::encode(album_id)), &[("market", "from_token".into())]).await?;
+        let mut album_info = album.clone();
+        if let Some(o) = album_info.as_object_mut() {
+            o.remove("tracks");
+        }
+        let mut out = Vec::new();
+        let mut page = album.get("tracks").cloned().unwrap_or(Value::Null);
+        loop {
+            for t in page.get("items").and_then(Value::as_array).into_iter().flatten() {
+                let credits = t
+                    .get("artists")
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| a.iter().any(|x| x.get("id").and_then(Value::as_str) == Some(artist_id)));
+                if !credits {
+                    continue;
+                }
+                let mut t = t.clone();
+                if let Some(o) = t.as_object_mut() {
+                    o.insert("album".into(), album_info.clone());
+                }
+                if let Some(m) = Self::map_track(&t) {
+                    out.push(m);
+                }
+            }
+            match page.get("next").and_then(Value::as_str) {
+                Some(next) => page = self.get(client_id, next, &[]).await?,
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
     /// Scopes from `required` that the stored sign-in lacks.
     pub fn missing_granted_scopes(&self, required: &[&'static str]) -> Vec<&'static str> {
         match self.secrets.get(SPOTIFY_TOKENS) {
@@ -1003,6 +1114,48 @@ mod tests {
             .await;
         let items = a.playlist_tracks("cid", "p1").await.unwrap();
         assert_eq!(items.iter().map(|t| t.provider_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn artist_releases_page_and_release_tracks_keep_only_the_artists_tracks() {
+        let mut server = mockito::Server::new_async().await;
+        let (a, store) = adapter(&server);
+        seed_tokens(&store, 3600);
+        let base = format!("{}/v1", server.url());
+        server
+            .mock("GET", "/v1/artists/ar1/albums")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("include_groups".into(), "album,single".into()),
+                Matcher::UrlEncoded("limit".into(), "10".into()),
+            ]))
+            .with_body(format!(r#"{{"items":[{{"id":"al1","name":"One","album_type":"album","release_date":"2020-01-02"}}],"next":"{base}/artists/ar1/albums?offset=10"}}"#))
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/v1/artists/ar1/albums")
+            .match_query(Matcher::UrlEncoded("offset".into(), "10".into()))
+            .with_body(r#"{"items":[{"id":"al2","name":"Two","album_type":"single","release_date":"2024"}],"next":null}"#)
+            .create_async()
+            .await;
+        let rel = a.artist_releases("cid", "ar1").await.unwrap();
+        assert_eq!(rel.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["al1", "al2"]);
+        assert_eq!(rel[1].album_type, "single");
+
+        server
+            .mock("GET", "/v1/albums/al1")
+            .match_query(Matcher::Any)
+            .with_body(
+                r#"{"id":"al1","name":"One","release_date":"2020-01-02","artists":[{"id":"ar1","name":"Ar"}],"images":[{"url":"https://i.scdn.co/c"}],
+                    "tracks":{"items":[
+                      {"type":"track","id":"t1","name":"Mine","artists":[{"id":"ar1","name":"Ar"},{"id":"x","name":"X"}]},
+                      {"type":"track","id":"t2","name":"Not mine","artists":[{"id":"x","name":"X"}]}
+                    ],"next":null}}"#,
+            )
+            .create_async()
+            .await;
+        let tracks = a.release_tracks("cid", "al1", "ar1").await.unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!((tracks[0].album.as_str(), tracks[0].year, tracks[0].artwork_url.as_deref()), ("One", Some(2020), Some("https://i.scdn.co/c")));
     }
 
     #[tokio::test]

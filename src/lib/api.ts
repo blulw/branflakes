@@ -133,6 +133,18 @@ export const api = {
   spotifySyncNow: (playlistId: string) => call<T.SyncReport>("spotify_sync_now", { playlistId }),
   spotifySyncAll: () => call<T.SyncAllReport>("spotify_sync_all"),
 
+  // followed spotify artists
+  artistsSearchSpotify: (query: string) => call<T.ArtistSearchResult[]>("artists_search_spotify", { query }),
+  artistsList: () => call<T.FollowedArtist[]>("artists_list"),
+  artistsGet: (id: string) => call<T.FollowedArtist>("artists_get", { id }),
+  /** Starts the first sync in the background. */
+  artistsFollow: (artist: T.SpotifyArtist) => call<T.FollowedArtist>("artists_follow", { artist }),
+  artistsUnfollow: (id: string) => call<void>("artists_unfollow", { id }),
+  artistsTracks: (id: string) => call<T.ArtistTrack[]>("artists_tracks", { id }),
+  artistsSetAutoSync: (id: string, on: boolean) => call<T.FollowedArtist>("artists_set_auto_sync", { id, on }),
+  artistsMarkSeen: (id: string) => call<T.FollowedArtist>("artists_mark_seen", { id }),
+  artistsSyncNow: (id: string) => call<T.ArtistSyncReport>("artists_sync_now", { id }),
+
   // soundcloud
   soundcloudConnect: () => call<void>("soundcloud_connect"),
   soundcloudDisconnect: () => call<void>("soundcloud_disconnect"),

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
-import type { AppSettings, Playlist, Track } from "@/lib/types";
+import type { AppSettings, FollowedArtist, Playlist, Track } from "@/lib/types";
 
 export type View =
   | { name: "library" }
@@ -11,6 +11,8 @@ export type View =
   | { name: "playlist"; id: string }
   | { name: "queue" }
   | { name: "search" }
+  | { name: "followed" }
+  | { name: "followedArtist"; id: string }
   | { name: "settings" };
 
 interface UiState {
@@ -22,6 +24,12 @@ interface UiState {
   editing: Track | null;
   /** Playlists with a Spotify sync running right now (from backend events). */
   syncing: Record<string, boolean>;
+  /** Followed Spotify artists (sidebar badge and the Followed page). */
+  followed: FollowedArtist[];
+  /** Followed artists with a sync running right now. */
+  artistSyncing: Record<string, boolean>;
+  setArtistSyncing(id: string, on: boolean): void;
+  refreshFollowed(): Promise<void>;
   /** Lyrics panel beside the main view. */
   lyricsOpen: boolean;
   toggleLyrics(): void;
@@ -53,6 +61,12 @@ export const useUi = create<UiState>((set) => ({
   settings: null,
   editing: null,
   syncing: {},
+  followed: [],
+  artistSyncing: {},
+  setArtistSyncing: (id, on) => set((s) => ({ artistSyncing: { ...s.artistSyncing, [id]: on } })),
+  async refreshFollowed() {
+    set({ followed: await api.artistsList() });
+  },
   lyricsOpen: loadLyricsOpen(),
   fullscreen: false,
   setFullscreen: (fullscreen) => set({ fullscreen }),
