@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyTheme, onColor, resolveCustom, resolvePreset, themeVars } from "./engine";
+import { applyTheme, luminance, onColor, resolveCustom, resolvePreset, themeVars } from "./engine";
 import { CUSTOM_THEME_ID, DEFAULT_CUSTOM, DEFAULT_THEME_ID, PRESETS } from "./themes";
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
 describe("theme presets", () => {
-  it("has about 50 themes including the requested ones", () => {
-    expect(PRESETS.length + 1).toBe(50);
+  it("has 250 themes including the requested ones", () => {
+    expect(PRESETS.length + 1).toBe(250);
     const names = PRESETS.map((p) => p.name);
     expect(names).toContain("Candy Floss");
     expect(names).toContain("Galaxy");
@@ -20,6 +20,24 @@ describe("theme presets", () => {
       expect(p.words.length, p.name).toBeLessThanOrEqual(4);
       for (const c of [p.background, p.surface, p.primary, p.accent, p.foreground]) expect(c, p.name).toMatch(HEX);
     }
+  });
+
+  it("has unique names", () => {
+    expect(new Set(PRESETS.map((p) => p.name.toLowerCase())).size).toBe(PRESETS.length);
+  });
+
+  it("keeps text readable and the primary colour visible", () => {
+    const ratio = (a: string, b: string) => {
+      const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m);
+      return (x + 0.05) / (y + 0.05);
+    };
+    const bad: string[] = [];
+    for (const p of PRESETS) {
+      if (ratio(p.foreground, p.background) < 7) bad.push(`${p.name}: text on background ${ratio(p.foreground, p.background).toFixed(2)}`);
+      if (ratio(p.foreground, p.surface) < 7) bad.push(`${p.name}: text on surface ${ratio(p.foreground, p.surface).toFixed(2)}`);
+      if (ratio(p.primary, p.background) < 2.2) bad.push(`${p.name}: primary on background ${ratio(p.primary, p.background).toFixed(2)}`);
+    }
+    expect(bad).toEqual([]);
   });
 
   it("includes some glowing and some translucent themes", () => {

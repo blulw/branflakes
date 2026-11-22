@@ -3,6 +3,9 @@
  * in ./engine.ts turns those into the app's CSS tokens.
  */
 
+import { glowAt, grid, scanlines, stars } from "./patterns";
+import { MORE_PRESETS } from "./morePresets";
+
 export type ThemeFont = "system" | "rounded" | "serif" | "mono" | "display";
 
 export interface ThemeOptions {
@@ -78,27 +81,6 @@ export const DEFAULT_CUSTOM: CustomTheme = {
   radius: 0.6,
   font: "system",
 };
-
-const stars = (c: string) =>
-  (
-    [
-      [13, 27, 180],
-      [71, 113, 180],
-      [140, 41, 180],
-      [37, 151, 240],
-      [199, 89, 240],
-      [111, 203, 240],
-      [167, 17, 300],
-      [251, 173, 300],
-      [61, 262, 300],
-    ] as const
-  )
-    .map(([x, y, s]) => `radial-gradient(1.3px 1.3px at ${x}px ${y}px, ${c}, transparent) 0 0 / ${s}px ${s}px`)
-    .join(", ");
-
-const glowAt = (c: string, at: string, size = "900px 600px") => `radial-gradient(${size} at ${at}, ${c}, transparent 65%)`;
-const scanlines = (c: string) => `repeating-linear-gradient(0deg, ${c} 0 1px, transparent 1px 3px)`;
-const grid = (c: string, s = 24) => `linear-gradient(${c} 1px, transparent 1px) 0 0 / ${s}px ${s}px, linear-gradient(90deg, ${c} 1px, transparent 1px) 0 0 / ${s}px ${s}px`;
 
 export const PRESETS: ThemePreset[] = [
   { id: "branflakes", name: "Branflakes", words: ["Classic", "Calm", "Minty", "Dark"], background: "#121318", surface: "#0d0e12", primary: "#45d3a3", accent: "#2b2c33", foreground: "#f2f3f6" },
@@ -267,6 +249,7 @@ export const PRESETS: ThemePreset[] = [
     glow: 0.35, radius: 1, font: "rounded",
   },
   { id: "honey", name: "Honey", words: ["Golden", "Sticky", "Warm", "Sweet"], background: "#1a1407", surface: "#241c0b", primary: "#ffb703", accent: "#fb8500", foreground: "#fff3d6", glow: 0.2, radius: 0.9 },
+  ...MORE_PRESETS,
 ];
 
 export const CUSTOM_WORDS = ["Yours", "Personal", "Anything", "Unique"];
