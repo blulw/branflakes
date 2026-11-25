@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, MoreHorizontal, Play, Volume2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ListPlus, MoreHorizontal, Play, Volume2 } from "lucide-react";
 import { Artwork } from "./Artwork";
 import { SourceBadge } from "./SourceBadge";
 import { TrackMenu } from "./TrackMenu";
+import { AddToPlaylistMenu } from "./AddToPlaylistMenu";
 import { Button } from "@/components/ui/button";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -63,8 +64,8 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
 
   // Columns drop out as the main view narrows: album, then source, then time.
   const cols = cn(
-    "grid-cols-[2rem_minmax(0,1fr)_2rem] gap-2 px-2 @sm:grid-cols-[2rem_minmax(0,1fr)_3rem_2rem] @xl:grid-cols-[2.5rem_minmax(0,3fr)_6.5rem_4rem_2.5rem] @xl:gap-3 @xl:px-4",
-    showAlbum && "@3xl:grid-cols-[2.5rem_minmax(0,3fr)_minmax(0,2fr)_6.5rem_4rem_2.5rem]",
+    "grid-cols-[2rem_minmax(0,1fr)_4rem] gap-2 px-2 @sm:grid-cols-[2rem_minmax(0,1fr)_3rem_4rem] @xl:grid-cols-[2.5rem_minmax(0,3fr)_6.5rem_4rem_4.5rem] @xl:gap-3 @xl:px-4",
+    showAlbum && "@3xl:grid-cols-[2.5rem_minmax(0,3fr)_minmax(0,2fr)_6.5rem_4rem_4.5rem]",
   );
 
   return (
@@ -137,11 +138,24 @@ export function TrackTable({ tracks, sort, descending, onSort, extraMenu, empty,
                   <SourceBadge source={t.source} />
                 </span>
                 <span className="dim hidden text-right text-xs tabular-nums @sm:block text-muted-foreground">{formatDuration(t.durationMs)}</span>
-                <TrackMenu track={t} extra={extraMenu?.(t, i)}>
-                  <Button variant="ghost" size="icon" className="size-8 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Track actions">
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                </TrackMenu>
+                <span className="flex justify-end">
+                  <AddToPlaylistMenu tracks={[t]}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                      aria-label={`Add ${t.title} to playlist`}
+                      title="Add to playlist"
+                    >
+                      <ListPlus className="size-4" />
+                    </Button>
+                  </AddToPlaylistMenu>
+                  <TrackMenu track={t} extra={extraMenu?.(t, i)}>
+                    <Button variant="ghost" size="icon" className="size-8 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100" aria-label="Track actions">
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </TrackMenu>
+                </span>
               </div>
             );
           })}

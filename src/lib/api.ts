@@ -114,6 +114,9 @@ export const api = {
   getLyrics: (trackId: string, refresh = false) => call<T.Lyrics | null>("lyrics_get", { trackId, refresh }),
   searchProviders: (query: string, spotifyOffset?: number) =>
     call<T.ProviderSearchResults>("search_providers", { query, spotifyOffset: spotifyOffset ?? null }),
+  searchAlbums: (query: string) => call<T.AlbumSearchResults>("search_albums", { query }),
+  /** Tracks of a Spotify or SoundCloud album (stored as non-library tracks). */
+  albumTracks: (source: "spotify" | "soundcloud", id: string) => call<T.Track[]>("album_tracks", { source, id }),
 
   // spotify
   spotifyConnect: () => call<void>("spotify_connect"),

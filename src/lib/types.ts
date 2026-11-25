@@ -395,6 +395,24 @@ export interface AppErrorPayload {
   message: string;
 }
 
+/** An album found by search. Local albums use `name + "\u0000" + artist` as their id. */
+export interface AlbumHit {
+  source: Source;
+  id: string;
+  name: string;
+  artist: string;
+  year: number | null;
+  artwork: string | null;
+  trackCount: number | null;
+  /** `album`, `single`, `compilation` or `ep`. */
+  albumType: string;
+}
+
+export interface AlbumSearchResults {
+  albums: AlbumHit[];
+  errors: { provider: string; error: AppErrorPayload }[];
+}
+
 export interface ProviderSearchResults {
   spotify: Track[];
   soundcloud: Track[];

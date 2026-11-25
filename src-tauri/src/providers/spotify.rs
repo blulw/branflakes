@@ -128,6 +128,20 @@ pub struct SpotifyArtist {
     pub genres: Vec<String>,
 }
 
+/// An album found by search, as shown in the UI (also used for SoundCloud albums).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumHit {
+    pub id: String,
+    pub name: String,
+    pub artist: String,
+    pub year: Option<i32>,
+    pub artwork: Option<String>,
+    pub track_count: Option<u32>,
+    /// `album`, `single`, `compilation` or `ep`.
+    pub album_type: String,
+}
+
 /// An album or single from `GET /artists/{id}/albums`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpotifyRelease {
@@ -659,9 +673,46 @@ impl SpotifyAdapter {
         Ok(out)
     }
 
+    /// Album search (Development Mode: at most 10 results per request).
+    pub async fn search_albums(&self, client_id: &str, q: &str) -> AppResult<Vec<AlbumHit>> {
+        let v = self
+            .get(
+                client_id,
+                "/search",
+                &[("q", q.into()), ("type", "album".into()), ("limit", SEARCH_LIMIT.to_string()), ("market", "from_token".into())],
+            )
+            .await?;
+        Ok(v.pointer("/albums/items").and_then(Value::as_array).map(|a| a.iter().filter_map(Self::map_album).collect()).unwrap_or_default())
+    }
+
+    pub fn map_album(a: &Value) -> Option<AlbumHit> {
+        Some(AlbumHit {
+            id: a.get("id").and_then(Value::as_str)?.to_string(),
+            name: a.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+            artist: a
+                .get("artists")
+                .and_then(Value::as_array)
+                .map(|x| x.iter().filter_map(|x| x.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join(", "))
+                .unwrap_or_default(),
+            year: a.get("release_date").and_then(Value::as_str).and_then(|d| d.get(..4)).and_then(|y| y.parse().ok()),
+            artwork: a.pointer("/images/0/url").and_then(Value::as_str).map(String::from),
+            track_count: a.get("total_tracks").and_then(Value::as_u64).map(|n| n as u32),
+            album_type: a.get("album_type").and_then(Value::as_str).unwrap_or("album").to_string(),
+        })
+    }
+
+    /// Every track of an album, in album order.
+    pub async fn album_tracks(&self, client_id: &str, album_id: &str) -> AppResult<Vec<TrackUpsert>> {
+        self.release_tracks_filtered(client_id, album_id, None).await
+    }
+
     /// The tracks of one release that credit `artist_id`. Album tracks come
     /// without their album, so it is filled in from the release itself.
     pub async fn release_tracks(&self, client_id: &str, album_id: &str, artist_id: &str) -> AppResult<Vec<TrackUpsert>> {
+        self.release_tracks_filtered(client_id, album_id, Some(artist_id)).await
+    }
+
+    async fn release_tracks_filtered(&self, client_id: &str, album_id: &str, artist_id: Option<&str>) -> AppResult<Vec<TrackUpsert>> {
         let album = self.get(client_id, &format!("/albums/{}", urlencoding::encode(album_id)), &[("market", "from_token".into())]).await?;
         let mut album_info = album.clone();
         if let Some(o) = album_info.as_object_mut() {
@@ -671,10 +722,11 @@ impl SpotifyAdapter {
         let mut page = album.get("tracks").cloned().unwrap_or(Value::Null);
         loop {
             for t in page.get("items").and_then(Value::as_array).into_iter().flatten() {
-                let credits = t
-                    .get("artists")
-                    .and_then(Value::as_array)
-                    .is_some_and(|a| a.iter().any(|x| x.get("id").and_then(Value::as_str) == Some(artist_id)));
+                let credits = artist_id.is_none_or(|artist_id| {
+                    t.get("artists")
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| a.iter().any(|x| x.get("id").and_then(Value::as_str) == Some(artist_id)))
+                });
                 if !credits {
                     continue;
                 }
@@ -1090,6 +1142,18 @@ mod tests {
         assert!(t.unavailable_reason.unwrap().contains("market"));
         assert!(SpotifyAdapter::map_track(&serde_json::json!({"type":"track","id":"x","is_local":true})).is_none());
         assert!(SpotifyAdapter::map_track(&serde_json::json!({"type":"episode","id":"x"})).is_none());
+    }
+
+    #[test]
+    fn maps_album_search_results() {
+        let a = SpotifyAdapter::map_album(&serde_json::json!({
+            "id": "al1", "name": "Abbey Road", "album_type": "album", "total_tracks": 17,
+            "release_date": "1969-09-26", "images": [{"url": "https://i.scdn.co/x"}],
+            "artists": [{"name": "The Beatles"}]
+        }))
+        .unwrap();
+        assert_eq!((a.id.as_str(), a.artist.as_str(), a.year, a.track_count), ("al1", "The Beatles", Some(1969), Some(17)));
+        assert!(SpotifyAdapter::map_album(&serde_json::json!({"name": "no id"})).is_none());
     }
 
     #[tokio::test]

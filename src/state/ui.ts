@@ -7,7 +7,15 @@ export type View =
   | { name: "artists" }
   | { name: "artist"; artist: string }
   | { name: "albums" }
-  | { name: "album"; album: string; artist: string }
+  | {
+      name: "album";
+      album: string;
+      artist: string;
+      /** Set for a Spotify/SoundCloud album that isn't (necessarily) in the library. */
+      remote?: { source: "spotify" | "soundcloud"; id: string; artwork: string | null; year: number | null };
+      /** Where "back" goes. */
+      from?: "search" | "albums";
+    }
   | { name: "playlist"; id: string }
   | { name: "queue" }
   | { name: "search" }

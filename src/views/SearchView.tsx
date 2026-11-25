@@ -1,38 +1,88 @@
 import { useState } from "react";
 import { Loader2, Search } from "lucide-react";
+import { create } from "zustand";
 import { TrackTable } from "@/components/TrackTable";
 import { SourceBadge } from "@/components/SourceBadge";
+import { Artwork } from "@/components/Artwork";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, toApiError } from "@/lib/api";
+import { localAlbumHit, pickAlbums } from "@/lib/albumMatch";
 import { usePlayer } from "@/playback/store";
-import type { Source, Track } from "@/lib/types";
+import { useUi } from "@/state/ui";
+import type { AlbumHit, Source, Track } from "@/lib/types";
+
+interface Results {
+  local: Track[];
+  spotify: Track[];
+  soundcloud: Track[];
+  errors: { provider: string; message: string }[];
+}
+
+/** Kept outside the view so results survive opening an album and coming back. */
+const useSearch = create<{
+  q: string;
+  results: Results | null;
+  albums: AlbumHit[];
+  spotifyOffset: number;
+  set(p: Partial<{ q: string; results: Results | null; albums: AlbumHit[]; spotifyOffset: number }>): void;
+}>((set) => ({ q: "", results: null, albums: [], spotifyOffset: 0, set: (p) => set(p) }));
+
+let searchSeq = 0;
 
 export function SearchView() {
   const providers = usePlayer((s) => s.providers);
-  const [q, setQ] = useState("");
+  const navigate = useUi((s) => s.navigate);
+  const { q, results, albums, spotifyOffset, set } = useSearch();
+  const setQ = (v: string) => set({ q: v });
   const [busy, setBusy] = useState(false);
-  const [results, setResults] = useState<{ local: Track[]; spotify: Track[]; soundcloud: Track[]; errors: { provider: string; message: string }[] } | null>(null);
-  const [spotifyOffset, setSpotifyOffset] = useState(0);
+
+  const searchAlbums = async (query: string, seq: number) => {
+    const [local, remote] = await Promise.all([
+      api.listAlbums().catch(() => []),
+      api.searchAlbums(query).catch(() => ({ albums: [], errors: [] })),
+    ]);
+    if (seq !== searchSeq) return;
+    set({ albums: pickAlbums(query, [...local.map(localAlbumHit), ...remote.albums]) });
+  };
 
   const run = async (offset = 0) => {
-    if (!q.trim()) return;
+    const query = q.trim();
+    if (!query) return;
     setBusy(true);
+    const seq = offset === 0 ? ++searchSeq : searchSeq;
+    if (offset === 0) {
+      set({ albums: [] });
+      void searchAlbums(query, seq);
+    }
     try {
-      const [local, remote] = await Promise.all([api.listTracks({ search: q, limit: 200 }), api.searchProviders(q, offset)]);
-      setSpotifyOffset(offset);
-      setResults((prev) => ({
-        local,
-        spotify: offset > 0 && prev ? [...prev.spotify, ...remote.spotify] : remote.spotify,
-        soundcloud: offset > 0 && prev ? prev.soundcloud : remote.soundcloud,
-        errors: remote.errors.map((e) => ({ provider: e.provider, message: e.error.message })),
-      }));
+      const [local, remote] = await Promise.all([api.listTracks({ search: query, limit: 200 }), api.searchProviders(query, offset)]);
+      if (seq !== searchSeq) return;
+      const prev = useSearch.getState().results;
+      set({
+        spotifyOffset: offset,
+        results: {
+          local,
+          spotify: offset > 0 && prev ? [...prev.spotify, ...remote.spotify] : remote.spotify,
+          soundcloud: offset > 0 && prev ? prev.soundcloud : remote.soundcloud,
+          errors: remote.errors.map((e) => ({ provider: e.provider, message: e.error.message })),
+        },
+      });
     } catch (e) {
-      setResults({ local: [], spotify: [], soundcloud: [], errors: [{ provider: "search", message: toApiError(e).message }] });
+      set({ results: { local: [], spotify: [], soundcloud: [], errors: [{ provider: "search", message: toApiError(e).message }] } });
     } finally {
       setBusy(false);
     }
   };
+
+  const openAlbum = (a: AlbumHit) =>
+    navigate({
+      name: "album",
+      album: a.name,
+      artist: a.artist,
+      from: "search",
+      remote: a.source === "local" ? undefined : { source: a.source, id: a.id, artwork: a.artwork, year: a.year },
+    });
 
   const section = (source: Source | "library", title: string, tracks: Track[], note?: string, more?: React.ReactNode) => (
     <section className="flex min-h-64 flex-col rounded-lg border">
@@ -71,6 +121,33 @@ export function SearchView() {
       </header>
       {results && (
         <div className="grid gap-4 px-4 pb-6 @xl:px-6">
+          {albums.length > 0 && (
+            <section aria-label="Albums">
+              <h2 className="mb-2 text-sm font-medium">Albums</h2>
+              <div className="grid max-w-3xl grid-cols-3 gap-2 @xl:gap-4">
+                {albums.map((a) => (
+                  <button
+                    key={`${a.source}|${a.id}`}
+                    onClick={() => openAlbum(a)}
+                    className="min-w-0 rounded-lg p-2 text-left hover:bg-accent"
+                    title={`${a.name} · ${a.artist}`}
+                  >
+                    <Artwork src={a.artwork} className="aspect-square w-full" alt={`${a.name} cover`} />
+                    <div className="mt-2 truncate text-sm font-medium">{a.name}</div>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="truncate">
+                        {a.artist}
+                        {a.year ? ` · ${a.year}` : ""}
+                      </span>
+                      <span className="ml-auto shrink-0">
+                        {a.source === "local" ? <span className="rounded bg-muted px-1 text-[10px]">LIBRARY</span> : <SourceBadge source={a.source} compact />}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           {results.errors.map((e) => (
             <p key={e.provider} className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {e.provider}: {e.message}
