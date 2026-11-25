@@ -16,6 +16,7 @@ import { FollowedArtistView, FollowedArtistsView } from "@/views/FollowedArtists
 import { LibraryView } from "@/views/LibraryView";
 import { AlbumsView, ArtistsView } from "@/views/BrowseViews";
 import { PlaylistView } from "@/views/PlaylistView";
+import { AlbumView } from "@/views/AlbumView";
 import { QueueView } from "@/views/QueueView";
 import { SearchView } from "@/views/SearchView";
 import { SettingsView } from "@/views/SettingsView";
@@ -36,7 +37,7 @@ function CurrentView() {
     case "albums":
       return <AlbumsView />;
     case "album":
-      return <LibraryView key={view.album} album={view.album} title={view.album} />;
+      return <AlbumView key={`${view.remote?.source ?? "local"}|${view.remote?.id ?? view.album}`} route={view} />;
     case "playlist":
       return <PlaylistView key={view.id} id={view.id} />;
     case "queue":

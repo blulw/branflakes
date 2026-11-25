@@ -220,6 +220,8 @@ pub fn run() {
             commands::lyrics_get,
             commands::soundcloud_web_import,
             commands::search_providers,
+            commands::search_albums,
+            commands::album_tracks,
             commands::lastfm_connect,
             commands::lastfm_disconnect,
             commands::lastfm_now_playing,

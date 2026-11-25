@@ -60,7 +60,7 @@ export function AlbumsView() {
       </header>
       <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2 overflow-y-auto px-4 pb-6 @xl:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] @xl:gap-4 @xl:px-6">
         {list.map((a) => (
-          <button key={`${a.name}|${a.artist}`} onClick={() => navigate({ name: "album", album: a.name, artist: a.artist })} className="group rounded-lg p-2 text-left hover:bg-accent">
+          <button key={`${a.name}|${a.artist}`} onClick={() => navigate({ name: "album", album: a.name, artist: a.artist, from: "albums" })} className="group rounded-lg p-2 text-left hover:bg-accent">
             <Artwork src={a.artwork} className="aspect-square w-full" alt={`${a.name} cover`} />
             <div className="mt-2 truncate text-sm font-medium">{a.name}</div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

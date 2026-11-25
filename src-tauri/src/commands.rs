@@ -1726,6 +1726,65 @@ pub async fn search_providers(state: S<'_>, query: String, spotify_offset: Optio
     Ok(out)
 }
 
+/// An album from a streaming provider's search.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSearchHit {
+    pub source: Source,
+    #[serde(flatten)]
+    pub album: crate::providers::spotify::AlbumHit,
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumSearchResults {
+    pub albums: Vec<AlbumSearchHit>,
+    pub errors: Vec<ProviderError>,
+}
+
+/// Search connected streaming providers for albums (Spotify first, then
+/// SoundCloud web mode). The UI decides which are relevant enough to show.
+#[tauri::command]
+pub async fn search_albums(state: S<'_>, query: String) -> AppResult<AlbumSearchResults> {
+    let q = query.trim().to_string();
+    let mut out = AlbumSearchResults::default();
+    if q.is_empty() {
+        return Ok(out);
+    }
+    if state.secrets.has(secrets::SPOTIFY_TOKENS) {
+        match spotify_client_id(&state) {
+            Ok(cid) => match state.spotify.search_albums(&cid, &q).await {
+                Ok(items) => out.albums.extend(items.into_iter().map(|album| AlbumSearchHit { source: Source::Spotify, album })),
+                Err(e) => out.errors.push(ProviderError { provider: "spotify".into(), error: e }),
+            },
+            Err(e) => out.errors.push(ProviderError { provider: "spotify".into(), error: e }),
+        }
+    }
+    if !state.secrets.has(secrets::SOUNDCLOUD_TOKENS) && soundcloud_web_enabled(&state)? {
+        match state.soundcloud_web.search_albums(&q, 10).await {
+            Ok(items) => out.albums.extend(items.into_iter().map(|album| AlbumSearchHit { source: Source::Soundcloud, album })),
+            Err(e) => out.errors.push(ProviderError { provider: "soundcloud (web mode)".into(), error: e }),
+        }
+    }
+    Ok(out)
+}
+
+/// All tracks of a Spotify or SoundCloud album, stored as non-library tracks
+/// (like search results) so they can be played and added to playlists.
+#[tauri::command]
+pub async fn album_tracks(state: S<'_>, source: Source, id: String) -> AppResult<Vec<Track>> {
+    let items = match source {
+        Source::Spotify => {
+            let cid = spotify_client_id(&state)?;
+            state.spotify.album_tracks(&cid, &id).await?
+        }
+        Source::Soundcloud => state.soundcloud_web.album_tracks(&id).await?,
+        Source::Local => return Err(AppError::InvalidInput("local albums are read from the library".into())),
+    };
+    let ids = upsert_many(&state, source, &items, false)?;
+    library::get_tracks(&state.conn(), &ids)
+}
+
 // ================================================================= lastfm
 
 #[tauri::command]

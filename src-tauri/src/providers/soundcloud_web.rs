@@ -21,6 +21,7 @@ use crate::error::{AppError, AppResult};
 use crate::http::{self, RetryPolicy};
 use crate::model::{Availability, TrackUpsert};
 use crate::providers::soundcloud::{safe_urn, SoundCloudAdapter, StreamInfo};
+use crate::providers::spotify::AlbumHit;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -247,6 +248,51 @@ impl SoundCloudWebAdapter {
             )
             .await?;
         Ok(v.get("collection").and_then(Value::as_array).map(|a| a.iter().filter_map(Self::map_track).collect()).unwrap_or_default())
+    }
+
+    /// Album search (SoundCloud "sets" marked as albums or EPs).
+    pub async fn search_albums(&self, q: &str, limit: u32) -> AppResult<Vec<AlbumHit>> {
+        let v = self.get("/search/albums", &[("q", q.into()), ("limit", limit.min(50).to_string())]).await?;
+        Ok(v.get("collection").and_then(Value::as_array).map(|a| a.iter().filter_map(Self::map_album).collect()).unwrap_or_default())
+    }
+
+    pub fn map_album(v: &Value) -> Option<AlbumHit> {
+        let id = v.get("id").and_then(Value::as_u64)?;
+        let artwork = v
+            .get("artwork_url")
+            .and_then(Value::as_str)
+            .or_else(|| v.pointer("/tracks/0/artwork_url").and_then(Value::as_str))
+            .map(|u| u.replace("-large.", "-t500x500."));
+        Some(AlbumHit {
+            id: id.to_string(),
+            name: v.get("title").and_then(Value::as_str).unwrap_or("SoundCloud album").to_string(),
+            artist: v
+                .pointer("/publisher_metadata/artist")
+                .or_else(|| v.pointer("/user/username"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            year: v
+                .get("release_date")
+                .or_else(|| v.get("display_date"))
+                .or_else(|| v.get("published_at"))
+                .and_then(Value::as_str)
+                .and_then(|d| d.get(..4))
+                .and_then(|y| y.parse().ok()),
+            artwork,
+            track_count: v.get("track_count").and_then(Value::as_u64).map(|n| n as u32),
+            album_type: v.get("set_type").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or("album").to_string(),
+        })
+    }
+
+    /// Every track of an album/set, in order.
+    pub async fn album_tracks(&self, id: &str) -> AppResult<Vec<TrackUpsert>> {
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(AppError::InvalidInput("not a SoundCloud album id".into()));
+        }
+        let v = self.get(&format!("/playlists/{id}"), &[]).await?;
+        let items = v.get("tracks").and_then(Value::as_array).cloned().unwrap_or_default();
+        self.hydrate(&items).await
     }
 
     /// Normalise a user-pasted link. Short `on.soundcloud.com` links are
